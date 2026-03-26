@@ -246,3 +246,65 @@ class TInvestService:
         except Exception as e:
             logger.error("Ошибка при синхронизации операций: %s", str(e))
             raise ValueError(f"Ошибка при синхронизации операций: {str(e)}")
+
+    def get_portfolio(self) -> dict:
+        """Получает текущее состояние портфеля из API (позиции, кэш, общую стоимость)"""
+        try:
+            with RetryingClient(self.token, settings=self.retry_settings) as client:
+                account_id = self._get_account_id(client)
+                
+                # Кэширование портфеля на 60 секунд
+                CACHE_KEY = f't_invest_portfolio_{account_id}'
+                cached_portfolio = cache.get(CACHE_KEY)
+                if cached_portfolio:
+                    return cached_portfolio
+                    
+                response = client.operations.get_portfolio(account_id=account_id)
+                
+                positions = []
+                currencies = []
+                
+                # Идем по всем позициям. В Tinkoff API и активы, и валюты могут лежать в response.positions
+                for pos in response.positions:
+                    # Извлекаем тип инструмента в виде строки (напр. 'share', 'currency')
+                    instrument_type = str(pos.instrument_type).split('.')[-1].lower()
+                    
+                    if instrument_type == 'currency' or pos.instrument_type == 'currency':
+                        # Для валют количество (quantity) - это их баланс
+                        currency_name = 'rub'
+                        if hasattr(pos, 'average_position_price') and hasattr(pos.average_position_price, 'currency'):
+                            currency_name = getattr(pos.average_position_price, 'currency')
+                        elif hasattr(pos, 'currency'):
+                            currency_name = getattr(pos, 'currency')
+                            
+                        currencies.append({
+                            'currency': str(currency_name).lower(),
+                            'balance': float(self._quotation_to_decimal(pos.quantity))
+                        })
+                    else:
+                        positions.append({
+                            'figi': pos.figi,
+                            'ticker': getattr(pos, 'ticker', None) or getattr(pos, 'instrument_uid', pos.figi),
+                            'instrument_type': instrument_type,
+                            'quantity': float(self._quotation_to_decimal(pos.quantity)),
+                            'average_buy_price': float(self._quotation_to_decimal(pos.average_position_price)),
+                            'current_price': float(self._quotation_to_decimal(pos.current_price)),
+                            'expected_yield': float(self._quotation_to_decimal(pos.expected_yield)),
+                            'current_nkd': float(self._quotation_to_decimal(pos.current_nkd)),
+                        })
+
+                result = {
+                    'account_id': account_id,
+                    'total_amount': float(self._quotation_to_decimal(response.total_amount_portfolio)),
+                    'positions': positions,
+                    'currencies': currencies,
+                    'updated_at': now()
+                }
+                
+                # Сохраняем в кэш на 60 секунд
+                cache.set(CACHE_KEY, result, timeout=60)
+                
+                return result
+        except Exception as e:
+            logger.error("Ошибка при получении портфеля: %s", str(e))
+            raise ValueError(f"Ошибка при получении портфеля: {str(e)}")
