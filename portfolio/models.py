@@ -89,6 +89,15 @@ class Transaction(models.Model):
     quantity = models.DecimalField(max_digits=15, decimal_places=6, default=0, verbose_name="Количество")
     price_per_unit = models.DecimalField(max_digits=15, decimal_places=4, default=0, verbose_name="Цена за единицу")
     date = models.DateTimeField(verbose_name="Дата операции")
+    
+    parent_transaction = models.ForeignKey(
+        'self', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='child_transactions',
+        verbose_name="Родительская операция"
+    )
 
     @property
     def total_amount(self):

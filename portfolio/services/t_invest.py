@@ -201,17 +201,23 @@ class TInvestService:
                     operations_response = client.operations.get_operations_by_cursor(request)
                     operations_items.extend(operations_response.items)
 
-                # Массовое добавление для ускорения
-                new_transactions = []
                 existing_ids = set(Transaction.objects.filter(
                     account=self.account,
                     date__range=(from_date, to_date)
                 ).values_list('external_id', flat=True))
 
+                new_transactions = []
+                parent_links = {}
+
                 for op in operations_items:
                     op_type = self._map_operation(op.type)
                     if not op_type:
                         continue # Пропускаем неподдерживаемые типы (например, отмены, блокировки)
+
+                    # Учитываем, что комиссии приходят как независимые операции с указанием parent_operation_id
+                    parent_op_id = getattr(op, 'parent_operation_id', None)
+                    if parent_op_id:
+                        parent_links[op.id] = parent_op_id
 
                     # Проверяем на дубликаты
                     if op.id in existing_ids:
@@ -237,11 +243,35 @@ class TInvestService:
                         date=op.date
                     ))
 
+                saved_count = 0
                 if new_transactions:
-                    # ignore_conflicts=True используется для избежания ошибок уникальности (например external_id)
                     Transaction.objects.bulk_create(new_transactions, ignore_conflicts=True)
+                    saved_count = len(new_transactions)
 
-                return len(new_transactions)
+                # Восстанавливаем связи дочерних операций (комиссий) с родительскими
+                if parent_links:
+                    # Получаем ID операций в базе
+                    all_related_external_ids = list(parent_links.keys()) + list(parent_links.values())
+                    db_txs = Transaction.objects.filter(
+                        account=self.account,
+                        external_id__in=all_related_external_ids
+                    ).values('id', 'external_id')
+                    
+                    # Карта external_id -> django_id
+                    ext_to_id = {tx['external_id']: tx['id'] for tx in db_txs}
+                    
+                    # Обновляем связи
+                    to_update = []
+                    for child_ext_id, parent_ext_id in parent_links.items():
+                        child_db_id = ext_to_id.get(child_ext_id)
+                        parent_db_id = ext_to_id.get(parent_ext_id)
+                        if child_db_id and parent_db_id:
+                            to_update.append(Transaction(id=child_db_id, parent_transaction_id=parent_db_id))
+                            
+                    if to_update:
+                        Transaction.objects.bulk_update(to_update, ['parent_transaction_id'])
+
+                return saved_count
 
         except Exception as e:
             logger.error("Ошибка при синхронизации операций: %s", str(e))
