@@ -1,0 +1,105 @@
+from django.db import models
+from django.contrib.auth.models import User
+from cryptography.fernet import Fernet
+from django.conf import settings
+
+# Инициализация Fernet с ключом из настроек
+fernet = Fernet(settings.FERNET_KEY)
+
+
+class Asset(models.Model):
+    """Справочник активов (акции, облигации и т.д.)"""
+    TYPE_CHOICES = [
+        ('Share', 'Акция'),
+        ('Bond', 'Облигация'),
+        ('ETF', 'Фонд'),
+        ('Currency', 'Валюта'),
+    ]
+
+    ticker = models.CharField(max_length=20, unique=True, verbose_name="Тикер")
+    isin = models.CharField(max_length=12, blank=True, null=True, verbose_name="ISIN")
+    name = models.CharField(max_length=255, verbose_name="Название")
+    asset_type = models.CharField(max_length=20, choices=TYPE_CHOICES, verbose_name="Тип актива")
+    currency = models.CharField(max_length=10, default='RUB', verbose_name="Валюта")
+
+    def __str__(self):
+        return f"{self.ticker} ({self.name})"
+
+    class Meta:
+        verbose_name = "Актив"
+        verbose_name_plural = "Активы"
+
+
+class BrokerAccount(models.Model):
+    """Брокерский счет пользователя с зашифрованным API-токеном"""
+    PROVIDER_CHOICES = [
+        ('T-Invest_API', 'Т-Инвестиции (API)'),
+        ('Manual', 'Ручной ввод'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='accounts', verbose_name="Пользователь")
+    name = models.CharField(max_length=100, verbose_name="Название счета")
+    provider_type = models.CharField(max_length=20, choices=PROVIDER_CHOICES, verbose_name="Провайдер")
+    provider_account_id = models.CharField(max_length=100, blank=True, null=True, verbose_name="ID счета у провайдера")
+    _encrypted_token = models.BinaryField(blank=True, null=True, verbose_name="Зашифрованный API-токен")
+
+    @property
+    def api_token(self):
+        """Расшифровывает и возвращает API-токен, если он есть"""
+        if self._encrypted_token:
+            return fernet.decrypt(bytes(self._encrypted_token)).decode()
+        return None
+
+    @api_token.setter
+    def api_token(self, raw_token):
+        """При установке API-токена, он шифруется и сохраняется в базе"""
+        if raw_token:
+            self._encrypted_token = fernet.encrypt(raw_token.encode())
+        else:
+            self._encrypted_token = None
+
+    def __str__(self):
+        return f"{self.name} ({self.user.username})"
+
+    class Meta:
+        verbose_name = "Брокерский счет"
+        verbose_name_plural = "Брокерские счета"
+
+
+class Transaction(models.Model):
+    """
+    Атомарная операция — покупка, продажа, дивиденды, налоги и т.д.
+
+    База для всех расчетов. Каждая транзакция связана с конкретным активом и брокерским счетом.
+    """
+    OPERATION_CHOICES = [
+        ('Buy', 'Покупка'),
+        ('Sell', 'Продажа'),
+        ('Dividend', 'Дивиденды'),
+        ('Tax', 'Налог'),
+        ('Fee', 'Комиссия'),
+        ('Deposit', 'Пополнение'),
+        ('Withdrawal', 'Вывод'),
+    ]
+
+    account = models.ForeignKey(BrokerAccount, on_delete=models.CASCADE, related_name='transactions')
+    external_id = models.CharField(max_length=255, unique=True, blank=True, null=True, verbose_name="Внешний ID (от брокера)")
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, null=True, blank=True)
+    operation_type = models.CharField(max_length=20, choices=OPERATION_CHOICES, verbose_name="Тип операции")
+    quantity = models.DecimalField(max_digits=15, decimal_places=6, default=0, verbose_name="Количество")
+    price_per_unit = models.DecimalField(max_digits=15, decimal_places=4, default=0, verbose_name="Цена за единицу")
+    date = models.DateTimeField(verbose_name="Дата операции")
+
+    @property
+    def total_amount(self):
+        """Общая сумма операции (quantity * price_per_unit)"""
+        return self.quantity * self.price_per_unit
+
+    def __str__(self):
+        asset_info = self.asset.ticker if self.asset else "Счет"
+        return f"{self.get_operation_type_display()} {asset_info} — {self.total_amount} RUB"
+
+    class Meta:
+        verbose_name = "Транзакция"
+        verbose_name_plural = "Транзакции"
+        ordering = ['-date']
