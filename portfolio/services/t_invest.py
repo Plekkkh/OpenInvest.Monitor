@@ -135,6 +135,17 @@ class TInvestService:
         self.account.save(update_fields=['provider_account_id'])
         return broker_account.id
 
+    def _get_account_opened_date(self, client, account_id: str) -> Optional[datetime]:
+        """Возвращает дату открытия счета для оптимизации синхронизации"""
+        try:
+            accounts_resp = client.users.get_accounts()
+            for acc in accounts_resp.accounts:
+                if acc.id == account_id:
+                    return acc.opened_date
+        except Exception as e:
+            logger.warning("Не удалось получить дату открытия счета %s: %s", account_id, e)
+        return None
+
     def sync_operations(self, from_date: Optional[datetime] = None, to_date: Optional[datetime] = None) -> int:
         """Скачивает и сохраняет операции"""
         try:
@@ -158,7 +169,13 @@ class TInvestService:
                     cache.set(CACHE_KEY, instrument_index, timeout=86400)
                 
                 if from_date is None:
-                    from_date = datetime(2000, 1, 1, tzinfo=timezone.utc)
+                    # Оптимизация: используем дату открытия счета вместо 2000-01-01
+                    opened_date = self._get_account_opened_date(client, account_id)
+                    if opened_date:
+                        from_date = opened_date
+                    else:
+                        from_date = datetime(2000, 1, 1, tzinfo=timezone.utc)
+                        
                 if to_date is None:
                     to_date = now()
                 
