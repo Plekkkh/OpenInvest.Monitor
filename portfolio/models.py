@@ -40,7 +40,7 @@ class BrokerAccount(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='accounts', verbose_name="Пользователь")
     name = models.CharField(max_length=100, verbose_name="Название счета")
     provider_type = models.CharField(max_length=20, choices=PROVIDER_CHOICES, verbose_name="Провайдер")
-    provider_account_id = models.CharField(max_length=100, blank=True, null=True, verbose_name="ID счета у провайдера")
+    provider_account_id = models.CharField(max_length=100, unique=True, blank=True, null=True, verbose_name="ID счета у провайдера")
     _encrypted_token = models.BinaryField(blank=True, null=True, verbose_name="Зашифрованный API-токен")
 
     @property
