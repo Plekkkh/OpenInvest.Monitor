@@ -5,7 +5,7 @@ from typing import Optional
 from django.utils.timezone import is_aware, make_aware, now
 from django.core.cache import cache
 
-from t_tech.invest import OperationState, OperationType, GetOperationsByCursorRequest
+from t_tech.invest import AccessLevel, OperationState, OperationType, GetOperationsByCursorRequest
 from t_tech.invest.schemas import Quotation, MoneyValue
 from t_tech.invest.retrying.sync.client import RetryingClient
 from t_tech.invest.retrying.settings import RetryClientSettings
@@ -121,11 +121,16 @@ class TInvestService:
             return self.account.provider_account_id
             
         accounts_resp = client.users.get_accounts()
-        # Выбираем первый счет, у которого тип брокерский или ИИС (или любой другой, если их нет)
-        if not accounts_resp.accounts:
-            raise ValueError("Брокерские счета не найдены в API.")
+
+        valid_accounts = [
+            acc for acc in accounts_resp.accounts 
+            if acc.access_level in (AccessLevel.ACCOUNT_ACCESS_LEVEL_FULL_ACCESS, AccessLevel.ACCOUNT_ACCESS_LEVEL_READ_ONLY)
+        ]
+
+        if not valid_accounts:
+            raise ValueError("Брокерские счета с доступными правами (FULL_ACCESS или READ_ONLY) не найдены в API.")
             
-        broker_account = accounts_resp.accounts[0]
+        broker_account = valid_accounts[0]
         self.account.provider_account_id = broker_account.id
         self.account.save(update_fields=['provider_account_id'])
         return broker_account.id
