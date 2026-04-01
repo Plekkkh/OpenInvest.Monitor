@@ -89,40 +89,48 @@
     </div>
 </div>
 
+{{ chart_data|json_script:"chart-data" }}
+
 <script>
     document.addEventListener("DOMContentLoaded", function() {
-        const rawChartData = '{{ chart_data_json|escapejs }}';
-        if (rawChartData && rawChartData !== 'null' && rawChartData !== '{}') {
-            const chartData = JSON.parse(rawChartData);
+        const chartDataElement = document.getElementById('chart-data');
+        if (chartDataElement) {
+            try {
+                const chartData = JSON.parse(chartDataElement.textContent);
 
-            const data = [{
-                values: chartData.values,
-                labels: chartData.labels,
-                type: 'pie',
-                hole: 0.5,
-                textposition: 'inside',
-                textinfo: 'percent',
-                hoverinfo: 'label+value+percent',
-                marker: {
-                    line: {
-                        color: '#ffffff',
-                        width: 2
-                    }
+                if (chartData && chartData.values && chartData.values.length > 0) {
+                    const data = [{
+                        values: chartData.values,
+                        labels: chartData.labels,
+                        type: 'pie',
+                        hole: 0.5,
+                        textposition: 'inside',
+                        textinfo: 'percent',
+                        hoverinfo: 'label+value+percent',
+                        marker: {
+                            line: {
+                                color: '#ffffff',
+                                width: 2
+                            }
+                        }
+                    }];
+
+                    const layout = {
+                        margin: {t: 20, b: 20, l: 20, r: 20},
+                        showlegend: true,
+                        paper_bgcolor: 'transparent',
+                        plot_bgcolor: 'transparent',
+                        legend: {
+                            orientation: 'h',
+                            y: -0.1
+                        }
+                    };
+
+                    Plotly.newPlot('allocation-chart', data, layout, {responsive: true, displayModeBar: false});
                 }
-            }];
-
-            const layout = {
-                margin: {t: 20, b: 20, l: 20, r: 20},
-                showlegend: true,
-                paper_bgcolor: 'transparent',
-                plot_bgcolor: 'transparent',
-                legend: {
-                    orientation: 'h',
-                    y: -0.1
-                }
-            };
-
-            Plotly.newPlot('allocation-chart', data, layout, {responsive: true, displayModeBar: false});
+            } catch (e) {
+                console.error("Error parsing chart data:", e);
+            }
         }
     });
 </script>

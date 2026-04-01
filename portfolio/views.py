@@ -32,13 +32,13 @@ class DashboardView(TemplateView):
         labels = []
         values = []
         for pos in positions:
-            labels.append(pos.get('ticker', pos.get('figi', 'Unknown')))
-            values.append(float(pos.get('current_price', 0)) * float(pos.get('quantity', 0)))
+            labels.append(pos.get('ticker') or pos.get('figi') or 'Unknown')
+            values.append(float(pos.get('current_price') or 0) * float(pos.get('quantity') or 0))
 
         currencies = analytics.get_cash_balance()
         for cur in currencies:
-            labels.append(cur.get('currency', 'RUB'))
-            values.append(float(cur.get('balance', 0)))
+            labels.append((cur.get('currency') or 'RUB').upper())
+            values.append(float(cur.get('balance') or 0))
 
         chart_data = {
             'labels': labels,
@@ -48,7 +48,7 @@ class DashboardView(TemplateView):
         context['account'] = account
         context['total_value'] = total_value
         context['xirr_value'] = xirr_value
-        context['chart_data_json'] = json.dumps(chart_data)
+        context['chart_data'] = chart_data
         context['recent_transactions'] = Transaction.objects.filter(account=account).order_by('-date')[:5]
         context['accounts'] = BrokerAccount.objects.all()
 
@@ -83,4 +83,3 @@ class TransactionListView(ListView):
             context['current_account'] = BrokerAccount.objects.first()
         context['accounts'] = BrokerAccount.objects.all()
         return context
-
