@@ -58,6 +58,14 @@ class BrokerAccount(models.Model):
         else:
             self._encrypted_token = None
 
+    @property
+    def masked_token(self):
+        """Возвращает замаскированный токен вида t.v2...abcd"""
+        token = self.api_token
+        if token and len(token) > 8:
+            return f"{token[:4]}...{token[-4:]}"
+        return None
+
     def __str__(self):
         return f"{self.name} ({self.user.username})"
 
