@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'portfolio',
+    'users',
 ]
 
 MIDDLEWARE = [
@@ -165,3 +166,7 @@ LOGGING = {
         },
     },
 }
+
+LOGIN_URL = 'users:login'
+LOGIN_REDIRECT_URL = 'portfolio:dashboard'
+LOGOUT_REDIRECT_URL = 'users:login'
