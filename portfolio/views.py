@@ -25,20 +25,63 @@ class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
             total_value = snapshot.get('total_amount', 0.0)
             xirr_value = analytics.calculate_xirr()
 
-            # Prepare chart data
+            # Prepare chart data and group by asset classes
             positions = analytics.get_portfolio_positions()
 
-            # Transform positions to JSON for Plotly
-            labels = []
-            values = []
+            asset_classes = {
+                'share': 'Акции',
+                'bond': 'Облигации',
+                'etf': 'Фонды',
+                'currency': 'Валюта',
+                'crypto': 'Криптовалюта',
+            }
+
+            groups = {}
+            for k in asset_classes.values():
+                groups[k] = {'name': k, 'current_value': 0.0, 'invested': 0.0, 'yield_amount': 0.0}
+
             for pos in positions:
-                labels.append(pos.get('ticker') or pos.get('figi') or 'Unknown')
-                values.append(float(pos.get('current_price') or 0) * float(pos.get('quantity') or 0))
+                itype = str(pos.get('instrument_type', '')).lower()
+                class_name = asset_classes.get(itype, 'Прочее')
+                if class_name not in groups:
+                    groups[class_name] = {'name': class_name, 'current_value': 0.0, 'invested': 0.0, 'yield_amount': 0.0}
+
+                qty = float(pos.get('quantity') or 0)
+                price = float(pos.get('current_price') or 0)
+                avg = float(pos.get('average_buy_price') or 0)
+                yld = float(pos.get('expected_yield') or 0)
+
+                cur_val = qty * price
+                inv = qty * avg
+
+                groups[class_name]['current_value'] += cur_val
+                groups[class_name]['invested'] += inv
+                groups[class_name]['yield_amount'] += yld
 
             currencies = analytics.get_cash_balance()
             for cur in currencies:
-                labels.append((cur.get('currency') or 'RUB').upper())
-                values.append(float(cur.get('balance') or 0))
+                class_name = 'Валюта'
+                bal = float(cur.get('balance') or 0)
+                groups[class_name]['current_value'] += bal
+                groups[class_name]['invested'] += bal
+
+            labels = []
+            values = []
+            portfolio_classes = []
+            total_portfolio_calc = sum(g['current_value'] for g in groups.values())
+
+            for g in groups.values():
+                cv = g['current_value']
+                if cv > 0 or g['invested'] > 0:
+                    labels.append(g['name'])
+                    values.append(cv)
+
+                    g['share'] = (cv / total_portfolio_calc * 100) if total_portfolio_calc > 0 else 0
+                    g['yield_percent'] = (g['yield_amount'] / g['invested'] * 100) if g['invested'] > 0 else 0
+                    portfolio_classes.append(g)
+
+            # Sort portfolio classes by share descending
+            portfolio_classes = sorted(portfolio_classes, key=lambda x: x['share'], reverse=True)
 
         except Exception as e:
             # Fallback if API or provider crashes
@@ -46,6 +89,7 @@ class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
             xirr_value = 0.0
             labels = []
             values = []
+            portfolio_classes = []
 
         chart_data = {
             'labels': labels,
@@ -55,11 +99,7 @@ class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
         context['total_value'] = total_value
         context['xirr_value'] = xirr_value
         context['chart_data'] = chart_data
-
-        # Optimize query with select_related for asset
-        context['recent_transactions'] = Transaction.objects.filter(
-            account=account
-        ).select_related('asset').order_by('-date')[:5]
+        context['portfolio_classes'] = portfolio_classes
 
         return context
 
