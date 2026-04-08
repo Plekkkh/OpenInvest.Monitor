@@ -66,26 +66,53 @@
                 <h5 class="mb-0">Recent Transactions</h5>
                 <a href="{% url 'portfolio:transactions' %}?account_id={{ account.id }}" class="btn btn-sm btn-light rounded-pill px-3 fw-semibold">View All</a>
             </div>
-            <div class="card-body pt-3">
-                <div class="list-group list-group-flush border-0">
-                    {% for txn in recent_transactions %}
-                    <div class="list-group-item px-0 py-3 border-bottom-0 mb-2 rounded-4" style="background-color: #f8f9fc;">
-                        <div class="d-flex w-100 justify-content-between px-3">
-                            <div>
-                                <h6 class="mb-1 fw-bold">{{ txn.get_operation_type_display }}</h6>
-                                <small class="text-muted">{% if txn.asset %}{{ txn.asset.ticker }}{% else %}Account Activity{% endif %}</small>
-                            </div>
-                            <div class="text-end">
-                                <p class="mb-1 fw-bold {% if txn.operation_type == 'Buy' or txn.operation_type == 'Deposit' %}text-success{% elif txn.operation_type == 'Sell' or txn.operation_type == 'Withdrawal' %}text-danger{% endif %}">
-                                    {{ txn.total_amount|floatformat:2 }} <small>RUB</small>
-                                </p>
-                                <small class="text-muted">{{ txn.date|date:"d M Y" }}</small>
-                            </div>
-                        </div>
-                    </div>
-                    {% empty %}
-                    <p class="text-muted text-center my-4 py-4 bg-light rounded-4">No recent transactions.</p>
-                    {% endfor %}
+            <div class="card-body pt-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0" id="portfolioTable">
+                        <thead class="text-secondary small tracking-wide" style="border-bottom: 2px solid #eef2f5;">
+                            <tr>
+                                <th scope="col" class="sortable" data-sort="name" style="cursor: pointer; user-select: none;">Название <span class="sort-icon ps-1">&#9650;</span></th>
+                                <th scope="col" class="sortable text-start" data-sort="value" style="cursor:
+                                pointer; user-select: none; padding-inline-start: 10rem;">Стоимость/Вложено <span
+                                        class="sort-icon ps-1"></span></th>
+                                <th scope="col" class="sortable text-start" data-sort="yield" style="cursor: pointer; user-select: none;">Доход <span class="sort-icon ps-1"></span></th>
+                                <th scope="col" class="sortable text-start" data-sort="share" style="cursor: pointer; user-select: none;">Доля <span class="sort-icon ps-1"></span></th>
+                            </tr>
+                        </thead>
+                        <tbody class="border-top-0">
+                            {% for group in portfolio_classes %}
+                            <tr>
+                                <td class="fw-bold text-dark py-3" data-sort-val="{{ group.name }}">
+                                    {{ group.name }}
+                                </td>
+                                <td class="text-start py-3" style="padding-inline-start: 10rem;" data-sort-val="{{ group.current_value }}">
+                                    <div class="fw-bold">{{ group.current_value|floatformat:2 }}</div>
+                                    <div class="small text-muted" style="font-size: 0.75rem;">{{ group.invested|floatformat:2 }}</div>
+                                </td>
+                                <td class="text-start py-3" data-sort-val="{{ group.yield_amount }}">
+                                    {% if group.yield_amount != 0 %}
+                                        <div class="fw-bold {% if group.yield_amount > 0 %}text-success{% else %}text-danger{% endif %}">
+                                            {% if group.yield_amount > 0 %}+{% endif %}{{ group.yield_amount|floatformat:2 }}
+                                        </div>
+                                        <div class="small {% if group.yield_percent > 0 %}text-success{% else %}text-danger{% endif %}" style="font-size: 0.75rem;">
+                                            {% if group.yield_percent > 0 %}+{% endif %}{{ group.yield_percent|floatformat:2 }}%
+                                        </div>
+                                    {% else %}
+                                        <div class="fw-bold text-muted">-</div>
+                                        <div class="small text-muted" style="font-size: 0.75rem;">0%</div>
+                                    {% endif %}
+                                </td>
+                                <td class="text-start fw-bold text-secondary py-3" data-sort-val="{{ group.share }}">
+                                    {{ group.share|floatformat:1 }}%
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center text-muted py-4">No assets in portfolio.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -134,6 +161,60 @@
             } catch (e) {
                 console.error("Error parsing chart data:", e);
             }
+        }
+
+        // Table Sorting Logic
+        const table = document.getElementById("portfolioTable");
+        if (table) {
+            const headers = table.querySelectorAll("th.sortable");
+            let currentSortColumn = -1;
+            let sortAscending = true;
+
+            headers.forEach((header, index) => {
+                header.addEventListener("click", () => {
+                    const sortType = header.getAttribute('data-sort');
+                    const tbody = table.querySelector("tbody");
+                    const rows = Array.from(tbody.querySelectorAll("tr"));
+
+                    if (rows.length === 0 || rows[0].cells.length === 1) return; // Empty message row
+
+                    if (currentSortColumn === index) {
+                        sortAscending = !sortAscending;
+                    } else {
+                        currentSortColumn = index;
+                        sortAscending = sortType === 'name'; // text default asc, num default desc
+                    }
+
+                    headers.forEach(h => {
+                        const icon = h.querySelector('.sort-icon');
+                        if (icon) icon.innerHTML = '';
+                    });
+
+                    const activeIcon = header.querySelector('.sort-icon');
+                    if (activeIcon) {
+                        activeIcon.innerHTML = sortAscending ? '&#9650;' : '&#9660;';
+                    }
+
+                    rows.sort((a, b) => {
+                        let aVal = a.cells[index].getAttribute('data-sort-val');
+                        let bVal = b.cells[index].getAttribute('data-sort-val');
+
+                        if (sortType === 'name') {
+                            aVal = aVal ? aVal.toLowerCase() : '';
+                            bVal = bVal ? bVal.toLowerCase() : '';
+                            if (aVal < bVal) return sortAscending ? -1 : 1;
+                            if (aVal > bVal) return sortAscending ? 1 : -1;
+                            return 0;
+                        } else {
+                            aVal = parseFloat(aVal) || 0;
+                            bVal = parseFloat(bVal) || 0;
+                            return sortAscending ? aVal - bVal : bVal - aVal;
+                        }
+                    });
+
+                    rows.forEach(row => tbody.appendChild(row));
+                });
+            });
         }
     });
 </script>
