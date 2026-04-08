@@ -16,8 +16,11 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.shortcuts import redirect
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('', include('portfolio.urls')),
+    path('users/', include('users.urls', namespace='users')),
+    path('portfolio/', include('portfolio.urls', namespace='portfolio')),
+    path('', lambda req: redirect('portfolio:dashboard')),
 ]
