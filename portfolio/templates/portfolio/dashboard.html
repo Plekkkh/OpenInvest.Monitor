@@ -21,7 +21,10 @@
 </div>
 
 {% if not account %}
-<div class="alert alert-warning island">No accounts found. Please add a broker account.</div>
+<div class="alert alert-warning island" style="display: flex; justify-content: space-between; align-items: center;">
+    <span>No accounts found. Please add a broker account.</span>
+    <a href="{% url 'portfolio:add_account' %}" class="btn btn-sm btn-primary">Добавить счет</a>
+</div>
 {% else %}
 
 <div class="row mb-4">

@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block title %}Добавить счет{% endblock %}
+
+{% block content %}
+<div class="island" style="max-width: 600px; margin: 40px auto; padding: 24px; border-radius: 12px; background: white; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+    <h2 style="margin-bottom: 20px;">Добавить брокерский счет</h2>
+    <form method="post">
+        {% csrf_token %}
+        {% for field in form %}
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: bold;">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}
+                    <small style="color: #666; display: block; margin-top: 4px;">{{ field.help_text }}</small>
+                {% endif %}
+                {% if field.errors %}
+                <div style="color: red; font-size: 0.8em; margin-top: 5px;">
+                    {{ field.errors.as_text }}
+                </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+        <div style="margin-top: 20px;">
+            <button type="submit" class="btn" style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer;">Сохранить</button>
+            <a href="{% url 'portfolio:dashboard' %}" class="btn" style="padding: 10px 20px; background: #e0e0e0; color: #333; text-decoration: none; border-radius: 8px; margin-left: 10px;">Отмена</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
+

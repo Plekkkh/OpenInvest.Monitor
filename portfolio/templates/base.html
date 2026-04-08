@@ -73,6 +73,18 @@
                 <li class="nav-item">
                     <a class="nav-link px-3" href="{% url 'portfolio:transactions' %}">Transactions</a>
                 </li>
+                {% if user.is_authenticated %}
+                <li class="nav-item">
+                    <form method="post" action="{% url 'users:logout' %}" class="d-inline">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-link nav-link px-3 text-danger fw-semibold" style="text-decoration: none;">Выйти ({{ user.username }})</button>
+                    </form>
+                </li>
+                {% else %}
+                <li class="nav-item">
+                    <a class="nav-link px-3" href="{% url 'users:login' %}">Войти</a>
+                </li>
+                {% endif %}
             </ul>
         </div>
     </div>
