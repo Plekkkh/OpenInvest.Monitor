@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% block title %}Регистрация{% endblock %}
+
+{% block content %}
+<div class="island auth-island" style="max-width: 400px; margin: 40px auto; padding: 24px; border-radius: 12px; background: white; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+    <h2 style="text-align: center; margin-bottom: 20px;">Регистрация</h2>
+    <form method="post" action="{% url 'users:register' %}">
+        {% csrf_token %}
+        {% for field in form %}
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px;">{{ field.label }}</label>
+                {{ field }}
+                {% if field.errors %}
+                <div style="color: red; font-size: 0.8em; margin-top: 5px;">
+                    {{ field.errors.as_text }}
+                </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+        <button type="submit" class="btn" style="width: 100%; padding: 10px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px;">Зарегистрироваться</button>
+    </form>
+    <div style="text-align: center; margin-top: 15px;">
+        <span style="font-size: 0.9em;">Уже есть аккаунт? <a href="{% url 'users:login' %}" style="color: #007bff; text-decoration: none;">Войти</a></span>
+    </div>
+</div>
+{% endblock %}
+

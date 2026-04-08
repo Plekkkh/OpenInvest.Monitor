@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}Вход{% endblock %}
+
+{% block content %}
+<div class="island auth-island" style="max-width: 400px; margin: 40px auto; padding: 24px; border-radius: 12px; background: white; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+    <h2 style="text-align: center; margin-bottom: 20px;">Вход</h2>
+    <form method="post" action="{% url 'users:login' %}">
+        {% csrf_token %}
+        <div style="margin-bottom: 15px;">
+            <label style="display: block; margin-bottom: 5px;">Имя пользователя</label>
+            <input type="text" name="username" class="form-input" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;" required>
+        </div>
+        <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 5px;">Пароль</label>
+            <input type="password" name="password" class="form-input" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;" required>
+        </div>
+        {% if form.errors %}
+        <div style="color: red; margin-bottom: 10px; font-size: 0.9em;">
+            Неверное имя пользователя или пароль.
+        </div>
+        {% endif %}
+        <button type="submit" class="btn" style="width: 100%; padding: 10px; background: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer;">Войти</button>
+    </form>
+    <div style="text-align: center; margin-top: 15px;">
+        <span style="font-size: 0.9em;">Нет аккаунта? <a href="{% url 'users:register' %}" style="color: #007bff; text-decoration: none;">Зарегистрироваться</a></span>
+    </div>
+</div>
+{% endblock %}
+
