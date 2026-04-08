@@ -61,7 +61,7 @@ class AnalyticsService:
         return snapshot.get('positions', [])
 
     def get_cash_balance(self) -> list:
-        """Возвращает список свободных средств (кэша) из снимка портфеля."""
+        """Возвращает список валютных активов (кэша) из снимка портфеля."""
         snapshot = self.get_current_portfolio_snapshot()
         return snapshot.get('currencies', [])
 
