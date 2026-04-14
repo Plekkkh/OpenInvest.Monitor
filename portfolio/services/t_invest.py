@@ -301,6 +301,10 @@ class TInvestService:
                         price = abs(payment)
                         qty = 1
 
+                    yield_amount = self._quotation_to_decimal(getattr(op, 'yield_', None))
+                    commission_amount = self._quotation_to_decimal(getattr(op, 'commission', None))
+                    accrued_int = self._quotation_to_decimal(getattr(op, 'accrued_int', None))
+
                     new_transactions.append(Transaction(
                         account=self.account,
                         external_id=op.id,
@@ -308,7 +312,10 @@ class TInvestService:
                         operation_type=op_type,
                         quantity=Decimal(str(qty)),
                         price_per_unit=price,
-                        date=op.date
+                        date=op.date,
+                        yield_amount=yield_amount,
+                        commission_amount=commission_amount,
+                        accrued_int=accrued_int
                     ))
 
                 saved_count = 0

@@ -112,6 +112,10 @@ class Transaction(models.Model):
     price_per_unit = models.DecimalField(max_digits=15, decimal_places=4, default=0, verbose_name="Цена за единицу")
     date = models.DateTimeField(verbose_name="Дата операции")
     
+    yield_amount = models.DecimalField(max_digits=15, decimal_places=4, default=0, verbose_name="Финансовый результат (доходность)")
+    commission_amount = models.DecimalField(max_digits=15, decimal_places=4, default=0, verbose_name="Удержанная комиссия")
+    accrued_int = models.DecimalField(max_digits=15, decimal_places=4, default=0, verbose_name="НКД (накопленный купонный доход)")
+
     parent_transaction = models.ForeignKey(
         'self', 
         on_delete=models.SET_NULL, 
