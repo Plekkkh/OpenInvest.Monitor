@@ -101,7 +101,8 @@ class AnalyticsService:
 
         try:
             xirr_value = pyxirr.xirr(dates, amounts)
-            return float(xirr_value) if xirr_value is not None else 0.0
+            # Возвращаем значение в процентах (умножаем на 100)
+            return float(xirr_value) * 100.0 if xirr_value is not None else 0.0
         except Exception:
             return 0.0
 
