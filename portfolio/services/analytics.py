@@ -116,22 +116,8 @@ class AnalyticsService:
         """
         return None
 
-    def get_profit_metrics(self) -> dict:
-        """
-        Агрегирует данные о прибыли по категориям:
-        Разница цен, начисления, налоги, комиссии, НКД, а также прибыль с продаж.
-        """
-        metrics = {
-            'asset_price_difference': 0.0,
-            'realized_pnl': 0.0,
-            'accruals': 0.0,
-            'taxes': 0.0,
-            'commissions': 0.0,
-            'aci': 0.0,
-            'total_profit': 0.0
-        }
-
-        # 1. Разница цены активов и НКД из текущих позиций
+    def _calculate_position_metrics(self, metrics: dict) -> None:
+        """Считает метрики на основе текущих позиций (nkd, ожидаемая доходность)"""
         positions = self.get_portfolio_positions()
         for pos in positions:
             yield_val = pos.get('expected_yield') or 0.0
@@ -139,7 +125,8 @@ class AnalyticsService:
             metrics['asset_price_difference'] += float(yield_val)
             metrics['aci'] += float(nkd_val)
 
-        # 2. Начисления, Налоги, Комиссии, Исторический НКД из транзакций
+    def _calculate_transaction_metrics(self, metrics: dict) -> None:
+        """Считает метрики на основе исторических транзакций"""
         transactions = Transaction.objects.filter(account=self.account)
         stats = transactions.values('operation_type').annotate(
             total_sum=Sum(F('quantity') * F('price_per_unit')),
@@ -175,6 +162,24 @@ class AnalyticsService:
                     metrics['taxes'] -= total_sum
             elif op_type in comm_types:
                 metrics['commissions'] += total_sum
+
+    def get_profit_metrics(self) -> dict:
+        """
+        Агрегирует данные о прибыли по категориям:
+        Разница цен, начисления, налоги, комиссии, НКД, а также прибыль с продаж.
+        """
+        metrics = {
+            'asset_price_difference': 0.0,
+            'realized_pnl': 0.0,
+            'accruals': 0.0,
+            'taxes': 0.0,
+            'commissions': 0.0,
+            'aci': 0.0,
+            'total_profit': 0.0
+        }
+
+        self._calculate_position_metrics(metrics)
+        self._calculate_transaction_metrics(metrics)
 
         # Общая прибыль: Разница цен + Зафиксированная прибыль + Начисления + НКД - Налоги - Комиссии
         metrics['total_profit'] = (
