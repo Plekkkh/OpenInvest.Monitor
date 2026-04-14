@@ -28,8 +28,8 @@
 {% else %}
 
 <div class="row mb-4">
-    <div class="col-md-6 col-lg-3 mb-4 mb-lg-0">
-        <div class="card h-100 p-2">
+    <div class="col-md-6 col-lg-4 mb-4 mb-lg-0">
+        <div class="card h-100 p-2 border-0 shadow-sm island">
             <div class="card-body d-flex flex-column justify-content-center">
                 <h6 class="text-uppercase text-muted fw-bold mb-3 tracking-wide" style="letter-spacing: 1px;">
                     Стоимость
@@ -41,19 +41,64 @@
             </div>
         </div>
     </div>
-    <div class="col-md-6 col-lg-3 mb-4 mb-lg-0">
-        <div class="card h-100 p-2">
+    <div class="col-md-6 col-lg-4 mb-4 mb-lg-0">
+        <div class="card h-100 p-2 border-0 shadow-sm island">
+            <div class="card-body d-flex flex-column justify-content-center">
+                <h6 class="text-uppercase text-muted fw-bold mb-3 tracking-wide" style="letter-spacing: 1px;">
+                    Прибыль
+                </h6>
+                <h2 class="fw-bold mb-3 text-{% if profit_metrics.total_profit > 0 %}success{% elif profit_metrics.total_profit < 0 %}danger{% else %}dark{% endif %}">
+                    {% if profit_metrics.total_profit > 0 %}+{% endif %}{{ profit_metrics.total_profit|floatformat:2 }}
+                    <span class="fs-6 text-muted">RUB</span>
+                </h2>
+
+                <div class="small">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Разница цен:</span>
+                        <span class="{% if profit_metrics.asset_price_difference > 0 %}text-success{% elif profit_metrics.asset_price_difference < 0 %}text-danger{% endif %} fw-bold">
+                            {% if profit_metrics.asset_price_difference > 0 %}+{% endif %}{{ profit_metrics.asset_price_difference|floatformat:2 }}
+                        </span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Прибыль с продаж:</span>
+                        <span class="{% if profit_metrics.realized_pnl > 0 %}text-success{% elif profit_metrics.realized_pnl < 0 %}text-danger{% endif %} fw-bold">
+                            {% if profit_metrics.realized_pnl > 0 %}+{% endif %}{{ profit_metrics.realized_pnl|floatformat:2 }}
+                        </span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Начисления:</span>
+                        <span class="text-success fw-bold">+{{ profit_metrics.accruals|floatformat:2 }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Налоги:</span>
+                        <span class="text-danger fw-bold">-{{ profit_metrics.taxes|floatformat:2 }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span class="text-muted">Комиссии:</span>
+                        <span class="text-danger fw-bold">-{{ profit_metrics.commissions|floatformat:2 }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">НКД:</span>
+                        <span class="{% if profit_metrics.aci > 0 %}text-success{% elif profit_metrics.aci < 0 %}text-danger{% endif %} fw-bold">
+                            {% if profit_metrics.aci > 0 %}+{% endif %}{{ profit_metrics.aci|floatformat:2 }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-4 mb-4 mb-lg-0">
+        <div class="card h-100 p-2 border-0 shadow-sm island">
             <div class="card-body d-flex flex-column justify-content-center">
                 <h6 class="text-uppercase text-muted fw-bold mb-3 tracking-wide" style="letter-spacing: 1px;">
                     Доходность
                 </h6>
                 <h2 class="fw-bold mb-0 text-{% if xirr_value > 0 %}success{% elif xirr_value < 0 %}danger{% else %}dark{% endif %}">
-                    {{ xirr_value|floatformat:2 }}%
+                    {% if xirr_value > 0 %}+{% endif %}{{ xirr_value|floatformat:2 }}%
                 </h2>
             </div>
         </div>
     </div>
-    <!-- Сюда в будущем можно добавить третий "остров" для статистики (доходность за сегодня или TWR) -->
 </div>
 
 <div class="row">
