@@ -1,7 +1,6 @@
 import logging
 from decimal import Decimal
 from datetime import datetime, timezone
-from typing import Optional
 from django.utils.timezone import is_aware, make_aware, now
 from django.core.cache import cache
 
@@ -44,7 +43,7 @@ class TInvestService:
         """Вспомогательный метод для конвертации Quotation/MoneyValue в Decimal"""
         return quotation_to_decimal(quotation) if quotation else Decimal('0')
 
-    def _map_operation(self, op_type: OperationType, payment: Decimal) -> Optional[str]:
+    def _map_operation(self, op_type: OperationType, payment: Decimal) -> str | None:
         """Маппинг типов операций Т-Инвестиций в локальные типы"""
         if op_type in OPERATION_MAPPING:
             return OPERATION_MAPPING[op_type]
@@ -91,7 +90,7 @@ class TInvestService:
                 logger.warning("Ошибка при загрузке индекса инструментов (%s): %s", group_name, e)
         return index
 
-    def _resolve_asset(self, instrument_index: dict, figi: str, instrument_uid: str) -> Optional[Asset]:
+    def _resolve_asset(self, instrument_index: dict, figi: str, instrument_uid: str) -> Asset | None:
         """Получение или создание актива по figi/uid из плоского индекса"""
         if not figi and not instrument_uid:
             return None
@@ -141,7 +140,7 @@ class TInvestService:
         self.account.save(update_fields=['provider_account_id'])
         return broker_account.id
 
-    def _get_account_opened_date(self, client, account_id: str) -> Optional[datetime]:
+    def _get_account_opened_date(self, client, account_id: str) -> datetime | None:
         """Возвращает дату открытия счета для оптимизации синхронизации"""
         try:
             accounts_resp = client.users.get_accounts()
@@ -152,150 +151,179 @@ class TInvestService:
             logger.warning("Не удалось получить дату открытия счета %s: %s", account_id, e)
         return None
 
+    def _get_or_build_instruments_index(self, client) -> dict:
+        CACHE_KEY = 't_invest_instruments_index'
+        instrument_index = cache.get(CACHE_KEY)
+
+        if not instrument_index:
+            settings = InstrumentsCacheSettings()
+            instruments_cache = InstrumentsCache(
+                settings=settings,
+                instruments_service=client.instruments
+            )
+            instrument_index = self._build_instruments_index(instruments_cache)
+            cache.set(CACHE_KEY, instrument_index, timeout=86400)
+        return instrument_index
+
+    def _fetch_operations_from_api(self, client, account_id: str, from_date: datetime, to_date: datetime) -> list:
+        request = GetOperationsByCursorRequest(
+            account_id=account_id,
+            from_=from_date,
+            to=to_date,
+            state=OperationState.OPERATION_STATE_EXECUTED,
+            limit=1000
+        )
+        operations_response = client.operations.get_operations_by_cursor(request)
+        operations_items = operations_response.items
+
+        while operations_response.has_next:
+            request.cursor = operations_response.next_cursor
+            operations_response = client.operations.get_operations_by_cursor(request)
+            operations_items.extend(operations_response.items)
+
+        return operations_items
+
+    def _process_and_save_operations(
+        self, operations_items, instrument_index: dict, from_date: datetime, to_date: datetime
+    ) -> int:
+        existing_ids = set(Transaction.objects.filter(
+            account=self.account,
+            date__range=(from_date, to_date)
+        ).values_list('external_id', flat=True))
+
+        new_transactions = []
+        parent_links = {}
+
+        for op in operations_items:
+            payment = self._quotation_to_decimal(op.payment)
+            op_type = self._map_operation(op.type, payment)
+            if not op_type:
+                continue
+
+            parent_op_id = getattr(op, 'parent_operation_id', None)
+            if parent_op_id:
+                parent_links[op.id] = parent_op_id
+
+            if op.id in existing_ids:
+                continue
+
+            asset = self._resolve_asset(instrument_index, op.figi, op.instrument_uid)
+            price = self._quotation_to_decimal(op.price)
+            qty = op.quantity if hasattr(op, 'quantity') else 0
+            if qty == 0:
+                price = abs(payment)
+                qty = 1
+
+            new_transactions.append(Transaction(
+                account=self.account,
+                external_id=op.id,
+                asset=asset,
+                operation_type=op_type,
+                quantity=Decimal(str(qty)),
+                price_per_unit=price,
+                date=op.date,
+                yield_amount=self._quotation_to_decimal(getattr(op, 'yield_', None)),
+                commission_amount=self._quotation_to_decimal(getattr(op, 'commission', None)),
+                accrued_int=self._quotation_to_decimal(getattr(op, 'accrued_int', None))
+            ))
+
+        saved_count = 0
+        if new_transactions:
+            Transaction.objects.bulk_create(new_transactions, ignore_conflicts=True)
+            saved_count = len(new_transactions)
+
+        self._restore_parent_links(parent_links)
+        return saved_count
+
+    def _restore_parent_links(self, parent_links: dict):
+        if not parent_links:
+            return
+
+        all_related_external_ids = list(parent_links.keys()) + list(parent_links.values())
+        db_txs = Transaction.objects.filter(
+            account=self.account,
+            external_id__in=all_related_external_ids
+        ).values('id', 'external_id')
+
+        ext_to_id = {tx['external_id']: tx['id'] for tx in db_txs}
+
+        to_update = []
+        for child_ext_id, parent_ext_id in parent_links.items():
+            child_db_id = ext_to_id.get(child_ext_id)
+            parent_db_id = ext_to_id.get(parent_ext_id)
+            if child_db_id and parent_db_id:
+                to_update.append(Transaction(id=child_db_id, parent_transaction_id=parent_db_id))
+
+        if to_update:
+            Transaction.objects.bulk_update(to_update, ['parent_transaction_id'])
+
     def sync_operations(
         self,
-        from_date: Optional[datetime] = None,
-        to_date: Optional[datetime] = None
+        from_date: datetime | None = None,
+        to_date: datetime | None = None
     ) -> int:
         """Скачивает и сохраняет операции"""
         try:
             with RetryingClient(self.token, settings=self.retry_settings) as client:
                 account_id = self._get_account_id(client)
-
-                # Пытаемся получить кеш инструментов
-                CACHE_KEY = 't_invest_instruments_index'
-                instrument_index = cache.get(CACHE_KEY)
-
-                if not instrument_index:
-                    settings = InstrumentsCacheSettings()
-                    instruments_cache = InstrumentsCache(
-                        settings=settings,
-                        instruments_service=client.instruments
-                    )
-
-                    # Инициализация плоского словаря для мгновенного поиска активов без class_code
-                    instrument_index = self._build_instruments_index(instruments_cache)
-
-                    # Сохраняем в кэш на 24 часа (86400 секунд)
-                    cache.set(CACHE_KEY, instrument_index, timeout=86400)
+                instrument_index = self._get_or_build_instruments_index(client)
 
                 if from_date is None:
-                    # Оптимизация: используем дату открытия счета вместо 2000-01-01
                     opened_date = self._get_account_opened_date(client, account_id)
-                    if opened_date:
-                        from_date = opened_date
-                    else:
-                        from_date = datetime(2000, 1, 1, tzinfo=timezone.utc)
+                    from_date: datetime = opened_date if opened_date else datetime(2000, 1, 1, tzinfo=timezone.utc)
 
                 if to_date is None:
-                    to_date = now()
+                    to_date: datetime = now()
 
-                # Приводим даты к UTC aware формату
                 if not is_aware(from_date):
-                    from_date = make_aware(from_date)
+                    from_date: datetime = make_aware(from_date)
                 if not is_aware(to_date):
-                    to_date = make_aware(to_date)
+                    to_date: datetime = make_aware(to_date)
 
-                request = GetOperationsByCursorRequest(
-                    account_id=account_id,
-                    from_=from_date,
-                    to=to_date,
-                    state=OperationState.OPERATION_STATE_EXECUTED,
-                    limit=1000
+                operations_items = self._fetch_operations_from_api(client, account_id, from_date, to_date)
+                saved_count = self._process_and_save_operations(
+                    operations_items, instrument_index, from_date, to_date
                 )
-
-                operations_response = client.operations.get_operations_by_cursor(request)
-                operations_items = operations_response.items
-
-                while operations_response.has_next:
-                    request.cursor = operations_response.next_cursor
-                    operations_response = client.operations.get_operations_by_cursor(request)
-                    operations_items.extend(operations_response.items)
-
-                existing_ids = set(Transaction.objects.filter(
-                    account=self.account,
-                    date__range=(from_date, to_date)
-                ).values_list('external_id', flat=True))
-
-                new_transactions = []
-                parent_links = {}
-
-                for op in operations_items:
-                    payment = self._quotation_to_decimal(op.payment)
-                    op_type = self._map_operation(op.type, payment)
-                    if not op_type:
-                        # Пропускаем неподдерживаемые типы (отмены и т.д.)
-                        continue
-
-                    # Учитываем, что комиссии приходят как независимые операции с указанием parent_operation_id
-                    parent_op_id = getattr(op, 'parent_operation_id', None)
-                    if parent_op_id:
-                        parent_links[op.id] = parent_op_id
-
-                    # Проверяем на дубликаты
-                    if op.id in existing_ids:
-                        continue
-
-                    asset = self._resolve_asset(instrument_index, op.figi, op.instrument_uid)
-
-                    price = self._quotation_to_decimal(op.price)
-                    qty = op.quantity if hasattr(op, 'quantity') else 0
-                    if qty == 0:
-                        # Если qty = 0, значит это не сделка (налог, комиссия, ввод)
-                        # Записываем сумму как price
-                        price = abs(payment)
-                        qty = 1
-
-                    yield_amount = self._quotation_to_decimal(getattr(op, 'yield_', None))
-                    commission_amount = self._quotation_to_decimal(getattr(op, 'commission', None))
-                    accrued_int = self._quotation_to_decimal(getattr(op, 'accrued_int', None))
-
-                    new_transactions.append(Transaction(
-                        account=self.account,
-                        external_id=op.id,
-                        asset=asset,
-                        operation_type=op_type,
-                        quantity=Decimal(str(qty)),
-                        price_per_unit=price,
-                        date=op.date,
-                        yield_amount=yield_amount,
-                        commission_amount=commission_amount,
-                        accrued_int=accrued_int
-                    ))
-
-                saved_count = 0
-                if new_transactions:
-                    Transaction.objects.bulk_create(new_transactions, ignore_conflicts=True)
-                    saved_count = len(new_transactions)
-
-                # Восстанавливаем связи дочерних операций (комиссий) с родительскими
-                if parent_links:
-                    # Получаем ID операций в базе
-                    all_related_external_ids = list(parent_links.keys()) + list(parent_links.values())
-                    db_txs = Transaction.objects.filter(
-                        account=self.account,
-                        external_id__in=all_related_external_ids
-                    ).values('id', 'external_id')
-
-                    # Карта external_id -> django_id
-                    ext_to_id = {tx['external_id']: tx['id'] for tx in db_txs}
-
-                    # Обновляем связи
-                    to_update = []
-                    for child_ext_id, parent_ext_id in parent_links.items():
-                        child_db_id = ext_to_id.get(child_ext_id)
-                        parent_db_id = ext_to_id.get(parent_ext_id)
-                        if child_db_id and parent_db_id:
-                            to_update.append(Transaction(id=child_db_id, parent_transaction_id=parent_db_id))
-
-                    if to_update:
-                        Transaction.objects.bulk_update(to_update, ['parent_transaction_id'])
-
                 return saved_count
 
         except Exception as e:
             logger.error("Ошибка при синхронизации операций: %s", str(e))
             raise ValueError(f"Ошибка при синхронизации операций: {str(e)}")
+
+    def _parse_positions_and_currencies(self, client_response_positions) -> tuple[list, list]:
+        """Разбирает ответ API на позиции и валюты"""
+        positions = []
+        currencies = []
+
+        for pos in client_response_positions:
+            instrument_type = str(pos.instrument_type).split('.')[-1].lower()
+
+            if instrument_type == 'currency' or pos.instrument_type == 'currency':
+                currency_name = 'rub'
+                has_avg_price = hasattr(pos, 'average_position_price')
+                has_currency_in_avg = (has_avg_price and hasattr(pos.average_position_price, 'currency'))
+
+                if has_currency_in_avg:
+                    currency_name = getattr(pos.average_position_price, 'currency')
+                elif hasattr(pos, 'currency'):
+                    currency_name = getattr(pos, 'currency')
+
+                currencies.append({
+                    'currency': str(currency_name).lower(),
+                    'balance': float(self._quotation_to_decimal(pos.quantity))
+                })
+            else:
+                positions.append({
+                    'figi': pos.figi,
+                    'ticker': getattr(pos, 'ticker', None) or getattr(pos, 'instrument_uid', pos.figi),
+                    'instrument_type': instrument_type,
+                    'quantity': float(self._quotation_to_decimal(pos.quantity)),
+                    'average_buy_price': float(self._quotation_to_decimal(pos.average_position_price)),
+                    'current_price': float(self._quotation_to_decimal(pos.current_price)),
+                    'expected_yield': float(self._quotation_to_decimal(pos.expected_yield)),
+                    'current_nkd': float(self._quotation_to_decimal(pos.current_nkd)),
+                })
+        return positions, currencies
 
     def get_portfolio(self) -> dict:
         """Получает текущее состояние портфеля из API"""
@@ -310,46 +338,9 @@ class TInvestService:
                     return cached_portfolio
 
                 response = client.operations.get_portfolio(account_id=account_id)
+                positions, currencies = self._parse_positions_and_currencies(response.positions)
 
-                positions = []
-                currencies = []
-
-                # В Tinkoff API активы и валюты могут лежать в response.positions
-                for pos in response.positions:
-                    # Извлекаем тип инструмента в виде строки (напр. 'share', 'currency')
-                    instrument_type = str(pos.instrument_type).split('.')[-1].lower()
-
-                    if instrument_type == 'currency' or pos.instrument_type == 'currency':
-                        # Для валют количество (quantity) - это их баланс
-                        currency_name = 'rub'
-
-                        has_avg_price = hasattr(pos, 'average_position_price')
-                        has_currency_in_avg = (has_avg_price and hasattr(pos.average_position_price, 'currency'))
-
-                        if has_currency_in_avg:
-                            currency_name = getattr(pos.average_position_price, 'currency')
-                        elif hasattr(pos, 'currency'):
-                            currency_name = getattr(pos, 'currency')
-
-                        currencies.append({
-                            'currency': str(currency_name).lower(),
-                            'balance': float(self._quotation_to_decimal(pos.quantity))
-                        })
-                    else:
-                        positions.append({
-                            'figi': pos.figi,
-                            'ticker': getattr(pos, 'ticker', None) or getattr(pos, 'instrument_uid', pos.figi),
-                            'instrument_type': instrument_type,
-                            'quantity': float(self._quotation_to_decimal(pos.quantity)),
-                            'average_buy_price': float(self._quotation_to_decimal(pos.average_position_price)),
-                            'current_price': float(self._quotation_to_decimal(pos.current_price)),
-                            'expected_yield': float(self._quotation_to_decimal(pos.expected_yield)),
-                            'current_nkd': float(self._quotation_to_decimal(pos.current_nkd)),
-                        })
-
-                total_amount = float(
-                    self._quotation_to_decimal(response.total_amount_portfolio)
-                )
+                total_amount = float(self._quotation_to_decimal(response.total_amount_portfolio))
 
                 result = {
                     'account_id': account_id,
