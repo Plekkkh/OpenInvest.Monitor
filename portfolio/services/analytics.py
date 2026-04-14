@@ -1,6 +1,7 @@
 import pandas as pd
 import pyxirr
 from typing import Dict, Any, Optional
+from datetime import datetime
 
 from django.utils.timezone import now
 from portfolio.models import BrokerAccount, Transaction
@@ -77,15 +78,15 @@ class AnalyticsService:
         if df.empty:
             return 0.0
 
-        cash_flows_df = df[df['operation_type'].isin(['Deposit', 'Withdrawal'])].copy()
-        
+        cash_flows_df = df[df['operation_type'].isin(['deposit', 'withdrawal'])].copy()
+
         if cash_flows_df.empty:
             return 0.0
 
         dates = cash_flows_df['date'].tolist()
         amounts = []
         for _, row in cash_flows_df.iterrows():
-            if row['operation_type'] == 'Deposit':
+            if row['operation_type'] == 'deposit':
                 amounts.append(-row['total_amount'])
             else:
                 amounts.append(row['total_amount'])
@@ -112,3 +113,99 @@ class AnalyticsService:
         """
         return None
 
+    def get_profit_metrics(self) -> dict:
+        """
+        Агрегирует данные о прибыли по категориям:
+        Разница цен, начисления, налоги, комиссии, НКД, а также прибыль с продаж.
+        """
+        metrics = {
+            'asset_price_difference': 0.0,
+            'realized_pnl': 0.0,
+            'accruals': 0.0,
+            'taxes': 0.0,
+            'commissions': 0.0,
+            'aci': 0.0,
+            'total_profit': 0.0
+        }
+
+        # 1. Разница цены активов и НКД из текущих позиций
+        positions = self.get_portfolio_positions()
+        for pos in positions:
+            metrics['asset_price_difference'] += float(pos.get('expected_yield') or 0.0)
+            metrics['aci'] += float(pos.get('current_nkd') or 0.0)
+
+        # 2. Начисления, Налоги, Комиссии, Исторический НКД из списка транзакций
+        from django.db.models import Sum, F
+        transactions = Transaction.objects.filter(account=self.account)
+        stats = transactions.values('operation_type').annotate(
+            total_sum=Sum(F('quantity') * F('price_per_unit')),
+            total_yield=Sum('yield_amount'),
+            total_aci=Sum('accrued_int')
+        )
+
+        for stat in stats:
+            op_type = stat['operation_type']
+            total_sum = float(stat['total_sum'] or 0)
+
+            # Реализованная прибыль (приходит готовой от брокера при продажах/погашениях)
+            metrics['realized_pnl'] += float(stat['total_yield'] or 0)
+
+            # Исторический НКД при сделках: при покупке мы его платим (-), при продаже/погашении получаем (+)
+            aci_val = float(stat['total_aci'] or 0)
+            if op_type == 'buy':
+                metrics['aci'] -= aci_val
+            elif op_type in ('sell', 'repayment'):
+                metrics['aci'] += aci_val
+
+            if op_type == 'dividend' or op_type == 'coupon' or op_type == 'amortization' or op_type == 'other_accrual':
+                metrics['accruals'] += total_sum
+            elif op_type == 'tax' or op_type == 'tax_refund':
+                # Учитываем tax_refund как уменьшение налогов
+                if op_type == 'tax':
+                    metrics['taxes'] += total_sum
+                else:
+                    metrics['taxes'] -= total_sum
+            elif op_type == 'commission' or op_type == 'conversion_commission':
+                metrics['commissions'] += total_sum
+
+        # Общая прибыль: Разница цен + Зафиксированная прибыль + Начисления + НКД - Налоги - Комиссии
+        metrics['total_profit'] = (
+            metrics['asset_price_difference'] +
+            metrics['realized_pnl'] +
+            metrics['accruals'] +
+            metrics['aci'] -
+            metrics['taxes'] -
+            metrics['commissions']
+        )
+        return metrics
+
+    def get_portfolio_cash_flows(self, end_date: datetime = None) -> pd.DataFrame:
+        """
+        Возвращает DataFrame всех вводов/выводов средств с датами
+        """
+        transactions = Transaction.objects.filter(account=self.account)
+        if end_date:
+            transactions = transactions.filter(date__lte=end_date)
+
+        df = self._get_transactions_df(transactions)
+
+        if df.empty:
+            return pd.DataFrame(columns=['date', 'amount'])
+
+        # Фильтруем только пополнения и выводы
+        cash_flows_df = df[df['operation_type'].isin(['deposit', 'withdrawal'])].copy()
+
+        if cash_flows_df.empty:
+            return pd.DataFrame(columns=['date', 'amount'])
+
+        # amount = price_per_unit * quantity (штук как правило 1, а цена - это сумма)
+        # Для вводов (Deposit) значение положительное, для выводов (Withdrawal) - отрицательное
+        def get_signed_amount(row):
+            total = float(row['price_per_unit']) * float(row['quantity'])
+            if row['operation_type'] == 'deposit':
+                return total
+            return -total
+
+        cash_flows_df['amount'] = cash_flows_df.apply(get_signed_amount, axis=1)
+
+        return cash_flows_df[['date', 'amount']]
