@@ -24,6 +24,7 @@ class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
             snapshot = analytics.get_current_portfolio_snapshot()
             total_value = snapshot.get('total_amount', 0.0)
             xirr_value = analytics.calculate_xirr()
+            profit_metrics = analytics.get_profit_metrics()
 
             # Prepare chart data and group by asset classes
             positions = analytics.get_portfolio_positions()
@@ -87,6 +88,15 @@ class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
             # Fallback if API or provider crashes
             total_value = 0.0
             xirr_value = 0.0
+            profit_metrics = {
+                'asset_price_difference': 0.0,
+                'realized_pnl': 0.0,
+                'accruals': 0.0,
+                'taxes': 0.0,
+                'commissions': 0.0,
+                'aci': 0.0,
+                'total_profit': 0.0
+            }
             labels = []
             values = []
             portfolio_classes = []
@@ -98,6 +108,7 @@ class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
 
         context['total_value'] = total_value
         context['xirr_value'] = xirr_value
+        context['profit_metrics'] = profit_metrics
         context['chart_data'] = chart_data
         context['portfolio_classes'] = portfolio_classes
 
