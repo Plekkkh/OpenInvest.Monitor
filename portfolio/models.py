@@ -40,7 +40,9 @@ class BrokerAccount(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='accounts', verbose_name="Пользователь")
     name = models.CharField(max_length=100, verbose_name="Название счета")
     provider_type = models.CharField(max_length=20, choices=PROVIDER_CHOICES, verbose_name="Провайдер")
-    provider_account_id = models.CharField(max_length=100, unique=True, blank=True, null=True, verbose_name="ID счета у провайдера")
+    provider_account_id = models.CharField(
+        max_length=100, unique=True, blank=True, null=True, verbose_name="ID счета у провайдера"
+    )
     _encrypted_token = models.BinaryField(blank=True, null=True, verbose_name="Зашифрованный API-токен")
 
     @property
@@ -105,22 +107,30 @@ class Transaction(models.Model):
     ]
 
     account = models.ForeignKey(BrokerAccount, on_delete=models.CASCADE, related_name='transactions')
-    external_id = models.CharField(max_length=255, unique=True, blank=True, null=True, verbose_name="Внешний ID (от брокера)")
+    external_id = models.CharField(
+        max_length=255, unique=True, blank=True, null=True, verbose_name="Внешний ID (от брокера)"
+    )
     asset = models.ForeignKey(Asset, on_delete=models.CASCADE, null=True, blank=True)
     operation_type = models.CharField(max_length=30, choices=OPERATION_CHOICES, verbose_name="Тип операции")
     quantity = models.DecimalField(max_digits=15, decimal_places=6, default=0, verbose_name="Количество")
     price_per_unit = models.DecimalField(max_digits=15, decimal_places=4, default=0, verbose_name="Цена за единицу")
     date = models.DateTimeField(verbose_name="Дата операции")
-    
-    yield_amount = models.DecimalField(max_digits=15, decimal_places=4, default=0, verbose_name="Финансовый результат (доходность)")
-    commission_amount = models.DecimalField(max_digits=15, decimal_places=4, default=0, verbose_name="Удержанная комиссия")
-    accrued_int = models.DecimalField(max_digits=15, decimal_places=4, default=0, verbose_name="НКД (накопленный купонный доход)")
+
+    yield_amount = models.DecimalField(
+        max_digits=15, decimal_places=4, default=0, verbose_name="Финансовый результат (доходность)"
+    )
+    commission_amount = models.DecimalField(
+        max_digits=15, decimal_places=4, default=0, verbose_name="Удержанная комиссия"
+    )
+    accrued_int = models.DecimalField(
+        max_digits=15, decimal_places=4, default=0, verbose_name="НКД (накопленный купонный доход)"
+    )
 
     parent_transaction = models.ForeignKey(
-        'self', 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        blank=True, 
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name='child_transactions',
         verbose_name="Родительская операция"
     )

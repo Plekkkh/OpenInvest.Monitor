@@ -5,7 +5,12 @@ from typing import Optional
 from django.utils.timezone import is_aware, make_aware, now
 from django.core.cache import cache
 
-from t_tech.invest import AccessLevel, OperationState, OperationType, GetOperationsByCursorRequest
+from t_tech.invest import (
+    AccessLevel,
+    OperationState,
+    OperationType,
+    GetOperationsByCursorRequest
+)
 from t_tech.invest.schemas import Quotation, MoneyValue
 from t_tech.invest.retrying.sync.client import RetryingClient
 from t_tech.invest.retrying.settings import RetryClientSettings
@@ -15,18 +20,23 @@ from t_tech.invest.utils import quotation_to_decimal
 
 from portfolio.models import BrokerAccount, Transaction, Asset
 
+
 logger = logging.getLogger(__name__)
+
 
 class TInvestService:
     """Сервис для интеграции с API Т-Инвестиций"""
-    
+
     def __init__(self, account: BrokerAccount) -> None:
         self.account = account
         self.token = account.api_token
         if not self.token:
             raise ValueError(f"Для счета {account.name} не установлен API-токен.")
-        
-        self.retry_settings = RetryClientSettings(use_retry=True, max_retry_attempt=3)
+
+        self.retry_settings = RetryClientSettings(
+            use_retry=True,
+            max_retry_attempt=3
+        )
 
     def _quotation_to_decimal(self, quotation: Quotation | MoneyValue) -> Decimal:
         """Вспомогательный метод для конвертации Quotation/MoneyValue в Decimal"""
@@ -128,10 +138,10 @@ class TInvestService:
     def _build_instruments_index(self, instruments_cache: InstrumentsCache) -> dict:
         """
         Строит локальный O(1) индекс по всем инструментам.
-        
-        Обоснование: стандартные методы SDK `share_by`, `bond_by` из InstrumentsCache 
-        требуют передачи `class_code` (внутренний ключ кэша: (class_code, id)), 
-        которого у нас нет в ответе get_operations_by_cursor. 
+
+        Обоснование: стандартные методы SDK `share_by`, `bond_by` из InstrumentsCache
+        требуют передачи `class_code` (внутренний ключ кэша: (class_code, id)),
+        которого у нас нет в ответе get_operations_by_cursor.
         Поэтому мы единоразово собираем плоский словарь по UID и FIGI.
         """
         index = {}
@@ -141,7 +151,7 @@ class TInvestService:
                 collection = method()
                 for inst in collection.instruments:
                     inst_type = getattr(inst, 'instrument_type', type(inst).__name__).lower()
-                    # Сохраняем только необходимые поля в виде словаря для совместимости с Redis/Memcached 
+                    # Сохраняем только необходимые поля в виде словаря для совместимости с Redis/Memcached
                     # и предотвращения ошибок сериализации
                     data = {
                         'ticker': inst.ticker,
@@ -162,7 +172,7 @@ class TInvestService:
         """Получение или создание актива по figi/uid из плоского индекса"""
         if not figi and not instrument_uid:
             return None
-            
+
         try:
             instrument = instrument_index.get(instrument_uid) or instrument_index.get(figi)
 
@@ -178,7 +188,10 @@ class TInvestService:
                 )
                 return asset
         except Exception as e:
-            logger.warning("Ошибка при получении инструмента (figi=%s, uid=%s): %s", figi, instrument_uid, str(e))
+            logger.warning(
+                "Ошибка при получении инструмента (figi=%s, uid=%s): %s",
+                figi, instrument_uid, str(e)
+            )
 
         return None
 
@@ -186,17 +199,20 @@ class TInvestService:
         """Получает ID счета для синхронизации"""
         if self.account.provider_account_id:
             return self.account.provider_account_id
-            
+
         accounts_resp = client.users.get_accounts()
 
+        valid_levels = (
+            AccessLevel.ACCOUNT_ACCESS_LEVEL_FULL_ACCESS,
+            AccessLevel.ACCOUNT_ACCESS_LEVEL_READ_ONLY
+        )
         valid_accounts = [
-            acc for acc in accounts_resp.accounts 
-            if acc.access_level in (AccessLevel.ACCOUNT_ACCESS_LEVEL_FULL_ACCESS, AccessLevel.ACCOUNT_ACCESS_LEVEL_READ_ONLY)
+            acc for acc in accounts_resp.accounts if acc.access_level in valid_levels
         ]
 
         if not valid_accounts:
-            raise ValueError("Брокерские счета с доступными правами (FULL_ACCESS или READ_ONLY) не найдены в API.")
-            
+            raise ValueError("Брокерские счета с доступными правами не найдены.")
+
         broker_account = valid_accounts[0]
         self.account.provider_account_id = broker_account.id
         self.account.save(update_fields=['provider_account_id'])
@@ -213,12 +229,16 @@ class TInvestService:
             logger.warning("Не удалось получить дату открытия счета %s: %s", account_id, e)
         return None
 
-    def sync_operations(self, from_date: Optional[datetime] = None, to_date: Optional[datetime] = None) -> int:
+    def sync_operations(
+        self,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None
+    ) -> int:
         """Скачивает и сохраняет операции"""
         try:
             with RetryingClient(self.token, settings=self.retry_settings) as client:
                 account_id = self._get_account_id(client)
-                
+
                 # Пытаемся получить кеш инструментов
                 CACHE_KEY = 't_invest_instruments_index'
                 instrument_index = cache.get(CACHE_KEY)
@@ -226,15 +246,16 @@ class TInvestService:
                 if not instrument_index:
                     settings = InstrumentsCacheSettings()
                     instruments_cache = InstrumentsCache(
-                        settings=settings, instruments_service=client.instruments
+                        settings=settings,
+                        instruments_service=client.instruments
                     )
 
                     # Инициализация плоского словаря для мгновенного поиска активов без class_code
                     instrument_index = self._build_instruments_index(instruments_cache)
-                    
+
                     # Сохраняем в кэш на 24 часа (86400 секунд)
                     cache.set(CACHE_KEY, instrument_index, timeout=86400)
-                
+
                 if from_date is None:
                     # Оптимизация: используем дату открытия счета вместо 2000-01-01
                     opened_date = self._get_account_opened_date(client, account_id)
@@ -242,10 +263,10 @@ class TInvestService:
                         from_date = opened_date
                     else:
                         from_date = datetime(2000, 1, 1, tzinfo=timezone.utc)
-                        
+
                 if to_date is None:
                     to_date = now()
-                
+
                 # Приводим даты к UTC aware формату
                 if not is_aware(from_date):
                     from_date = make_aware(from_date)
@@ -280,7 +301,8 @@ class TInvestService:
                     payment = self._quotation_to_decimal(op.payment)
                     op_type = self._map_operation(op.type, payment)
                     if not op_type:
-                        continue # Пропускаем неподдерживаемые типы (например, отмены, блокировки)
+                        # Пропускаем неподдерживаемые типы (отмены и т.д.)
+                        continue
 
                     # Учитываем, что комиссии приходят как независимые операции с указанием parent_operation_id
                     parent_op_id = getattr(op, 'parent_operation_id', None)
@@ -331,10 +353,10 @@ class TInvestService:
                         account=self.account,
                         external_id__in=all_related_external_ids
                     ).values('id', 'external_id')
-                    
+
                     # Карта external_id -> django_id
                     ext_to_id = {tx['external_id']: tx['id'] for tx in db_txs}
-                    
+
                     # Обновляем связи
                     to_update = []
                     for child_ext_id, parent_ext_id in parent_links.items():
@@ -342,7 +364,7 @@ class TInvestService:
                         parent_db_id = ext_to_id.get(parent_ext_id)
                         if child_db_id and parent_db_id:
                             to_update.append(Transaction(id=child_db_id, parent_transaction_id=parent_db_id))
-                            
+
                     if to_update:
                         Transaction.objects.bulk_update(to_update, ['parent_transaction_id'])
 
@@ -353,35 +375,39 @@ class TInvestService:
             raise ValueError(f"Ошибка при синхронизации операций: {str(e)}")
 
     def get_portfolio(self) -> dict:
-        """Получает текущее состояние портфеля из API (позиции, кэш, общую стоимость)"""
+        """Получает текущее состояние портфеля из API"""
         try:
             with RetryingClient(self.token, settings=self.retry_settings) as client:
                 account_id = self._get_account_id(client)
-                
+
                 # Кэширование портфеля на 60 секунд
                 CACHE_KEY = f't_invest_portfolio_{account_id}'
                 cached_portfolio = cache.get(CACHE_KEY)
                 if cached_portfolio:
                     return cached_portfolio
-                    
+
                 response = client.operations.get_portfolio(account_id=account_id)
-                
+
                 positions = []
                 currencies = []
-                
-                # Идем по всем позициям. В Tinkoff API и активы, и валюты могут лежать в response.positions
+
+                # В Tinkoff API активы и валюты могут лежать в response.positions
                 for pos in response.positions:
                     # Извлекаем тип инструмента в виде строки (напр. 'share', 'currency')
                     instrument_type = str(pos.instrument_type).split('.')[-1].lower()
-                    
+
                     if instrument_type == 'currency' or pos.instrument_type == 'currency':
                         # Для валют количество (quantity) - это их баланс
                         currency_name = 'rub'
-                        if hasattr(pos, 'average_position_price') and hasattr(pos.average_position_price, 'currency'):
+
+                        has_avg_price = hasattr(pos, 'average_position_price')
+                        has_currency_in_avg = (has_avg_price and hasattr(pos.average_position_price, 'currency'))
+
+                        if has_currency_in_avg:
                             currency_name = getattr(pos.average_position_price, 'currency')
                         elif hasattr(pos, 'currency'):
                             currency_name = getattr(pos, 'currency')
-                            
+
                         currencies.append({
                             'currency': str(currency_name).lower(),
                             'balance': float(self._quotation_to_decimal(pos.quantity))
@@ -398,17 +424,21 @@ class TInvestService:
                             'current_nkd': float(self._quotation_to_decimal(pos.current_nkd)),
                         })
 
+                total_amount = float(
+                    self._quotation_to_decimal(response.total_amount_portfolio)
+                )
+
                 result = {
                     'account_id': account_id,
-                    'total_amount': float(self._quotation_to_decimal(response.total_amount_portfolio)),
+                    'total_amount': total_amount,
                     'positions': positions,
                     'currencies': currencies,
                     'updated_at': now()
                 }
-                
+
                 # Сохраняем в кэш на 60 секунд
                 cache.set(CACHE_KEY, result, timeout=60)
-                
+
                 return result
         except Exception as e:
             logger.error("Ошибка при получении портфеля: %s", str(e))

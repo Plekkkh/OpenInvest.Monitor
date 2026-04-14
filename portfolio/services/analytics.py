@@ -4,8 +4,10 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 from django.utils.timezone import now
+from django.db.models import Sum, F
 from portfolio.models import BrokerAccount, Transaction
 from portfolio.services.t_invest import TInvestService
+
 
 class AnalyticsService:
     def __init__(self, account: BrokerAccount):
@@ -20,7 +22,7 @@ class AnalyticsService:
         transactions = Transaction.objects.filter(account=self.account).values(
             'date', 'operation_type', 'quantity', 'price_per_unit', 'asset__ticker', 'asset__asset_type'
         ).order_by('date')
-        
+
         if not transactions:
             return pd.DataFrame()
 
@@ -36,7 +38,7 @@ class AnalyticsService:
         """
         Возвращает текущую оценку портфеля.
         Если доступен API Т-Инвестиций, использует его метод get_portfolio().
-        Для счетов ручного ввода используется fallback-механизм (пока возвращает 0, 
+        Для счетов ручного ввода используется fallback-механизм (пока возвращает 0,
         в будущем можно реализовать расчет по базе).
         """
         if self.api_service:
@@ -46,7 +48,7 @@ class AnalyticsService:
             except Exception:
                 # В случае ошибки API возвращаем пустой снимок
                 pass
-        
+
         # Fallback для ручных счетов (Manual) - пока упрощенный, вернем 0
         # Для полноценного fallback потребуется запрашивать актуальные цены с рынка
         return {
@@ -94,7 +96,7 @@ class AnalyticsService:
         snapshot = self.get_current_portfolio_snapshot()
         current_value = snapshot.get('total_amount', 0.0)
 
-        # Добавляем текущую стоимость портфеля как финальный положительный поток
+        # Добавляем текущую стоимость портфеля как финальный поток
         if current_value > 0:
             dates.append(now())
             amounts.append(current_value)
@@ -132,11 +134,12 @@ class AnalyticsService:
         # 1. Разница цены активов и НКД из текущих позиций
         positions = self.get_portfolio_positions()
         for pos in positions:
-            metrics['asset_price_difference'] += float(pos.get('expected_yield') or 0.0)
-            metrics['aci'] += float(pos.get('current_nkd') or 0.0)
+            yield_val = pos.get('expected_yield') or 0.0
+            nkd_val = pos.get('current_nkd') or 0.0
+            metrics['asset_price_difference'] += float(yield_val)
+            metrics['aci'] += float(nkd_val)
 
-        # 2. Начисления, Налоги, Комиссии, Исторический НКД из списка транзакций
-        from django.db.models import Sum, F
+        # 2. Начисления, Налоги, Комиссии, Исторический НКД из транзакций
         transactions = Transaction.objects.filter(account=self.account)
         stats = transactions.values('operation_type').annotate(
             total_sum=Sum(F('quantity') * F('price_per_unit')),
@@ -144,29 +147,33 @@ class AnalyticsService:
             total_aci=Sum('accrued_int')
         )
 
+        accrual_types = ('dividend', 'coupon', 'amortization', 'other_accrual')
+        tax_types = ('tax', 'tax_refund')
+        comm_types = ('commission', 'conversion_commission')
+
         for stat in stats:
             op_type = stat['operation_type']
             total_sum = float(stat['total_sum'] or 0)
 
-            # Реализованная прибыль (приходит готовой от брокера при продажах/погашениях)
+            # Реализованная прибыль (от продаж/погашений)
             metrics['realized_pnl'] += float(stat['total_yield'] or 0)
 
-            # Исторический НКД при сделках: при покупке мы его платим (-), при продаже/погашении получаем (+)
+            # Исторический НКД: платим (-), получаем (+)
             aci_val = float(stat['total_aci'] or 0)
             if op_type == 'buy':
                 metrics['aci'] -= aci_val
             elif op_type in ('sell', 'repayment'):
                 metrics['aci'] += aci_val
 
-            if op_type == 'dividend' or op_type == 'coupon' or op_type == 'amortization' or op_type == 'other_accrual':
+            if op_type in accrual_types:
                 metrics['accruals'] += total_sum
-            elif op_type == 'tax' or op_type == 'tax_refund':
+            elif op_type in tax_types:
                 # Учитываем tax_refund как уменьшение налогов
                 if op_type == 'tax':
                     metrics['taxes'] += total_sum
                 else:
                     metrics['taxes'] -= total_sum
-            elif op_type == 'commission' or op_type == 'conversion_commission':
+            elif op_type in comm_types:
                 metrics['commissions'] += total_sum
 
         # Общая прибыль: Разница цен + Зафиксированная прибыль + Начисления + НКД - Налоги - Комиссии

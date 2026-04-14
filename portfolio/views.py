@@ -1,13 +1,11 @@
-import json
-from django.shortcuts import render, redirect
 from django.views.generic import TemplateView, ListView, CreateView
 from django.contrib.auth.mixins import LoginRequiredMixin
 from portfolio.models import BrokerAccount, Transaction
 from portfolio.services.analytics import AnalyticsService
 from portfolio.mixins import OwnerRequiredMixin, CurrentAccountMixin
 from django.urls import reverse_lazy
-from django.conf import settings
 from portfolio.forms import BrokerAccountForm
+
 
 class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
     template_name = 'portfolio/dashboard.html'
@@ -45,7 +43,9 @@ class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
                 itype = str(pos.get('instrument_type', '')).lower()
                 class_name = asset_classes.get(itype, 'Прочее')
                 if class_name not in groups:
-                    groups[class_name] = {'name': class_name, 'current_value': 0.0, 'invested': 0.0, 'yield_amount': 0.0}
+                    groups[class_name] = {
+                        'name': class_name, 'current_value': 0.0, 'invested': 0.0, 'yield_amount': 0.0
+                    }
 
                 qty = float(pos.get('quantity') or 0)
                 price = float(pos.get('current_price') or 0)
@@ -84,7 +84,7 @@ class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
             # Sort portfolio classes by share descending
             portfolio_classes = sorted(portfolio_classes, key=lambda x: x['share'], reverse=True)
 
-        except Exception as e:
+        except Exception:
             # Fallback if API or provider crashes
             total_value = 0.0
             xirr_value = 0.0
@@ -114,6 +114,7 @@ class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
 
         return context
 
+
 class TransactionListView(LoginRequiredMixin, OwnerRequiredMixin, CurrentAccountMixin, ListView):
     model = Transaction
     template_name = 'portfolio/transactions.html'
@@ -129,6 +130,7 @@ class TransactionListView(LoginRequiredMixin, OwnerRequiredMixin, CurrentAccount
             return queryset.filter(account=account).select_related('asset').order_by('-date')
 
         return queryset.none()
+
 
 class AccountCreateView(LoginRequiredMixin, CreateView):
     model = BrokerAccount
