@@ -81,19 +81,33 @@ class Transaction(models.Model):
     База для всех расчетов. Каждая транзакция связана с конкретным активом и брокерским счетом.
     """
     OPERATION_CHOICES = [
-        ('Buy', 'Покупка'),
-        ('Sell', 'Продажа'),
-        ('Dividend', 'Дивиденды'),
-        ('Tax', 'Налог'),
-        ('Fee', 'Комиссия'),
-        ('Deposit', 'Пополнение'),
-        ('Withdrawal', 'Вывод'),
+        # Сделки (затрагивают активы)
+        ('buy', 'Покупка'),
+        ('sell', 'Продажа'),
+        ('repayment', 'Погашение облигаций'),
+        # Начисления (полученная выгода)
+        ('dividend', 'Дивиденды'),
+        ('coupon', 'Купоны'),
+        ('amortization', 'Амортизационные выплаты'),
+        ('other_accrual', 'Прочие начисления'),
+        # Расходы (уменьшение баланса)
+        ('commission', 'Комиссия'),
+        ('tax', 'Налог'),
+        ('tax_refund', 'Возврат налога'),
+        ('expense', 'Расход'),
+        # Валюта (движение средств)
+        ('deposit', 'Пополнение счета'),
+        ('withdrawal', 'Вывод средств'),
+        ('other_income', 'Прочие доходы'),
+        ('other_expense', 'Прочие расходы'),
+        ('conversion', 'Конвертация'),
+        ('conversion_commission', 'Комиссия на конвертацию'),
     ]
 
     account = models.ForeignKey(BrokerAccount, on_delete=models.CASCADE, related_name='transactions')
     external_id = models.CharField(max_length=255, unique=True, blank=True, null=True, verbose_name="Внешний ID (от брокера)")
     asset = models.ForeignKey(Asset, on_delete=models.CASCADE, null=True, blank=True)
-    operation_type = models.CharField(max_length=20, choices=OPERATION_CHOICES, verbose_name="Тип операции")
+    operation_type = models.CharField(max_length=30, choices=OPERATION_CHOICES, verbose_name="Тип операции")
     quantity = models.DecimalField(max_digits=15, decimal_places=6, default=0, verbose_name="Количество")
     price_per_unit = models.DecimalField(max_digits=15, decimal_places=4, default=0, verbose_name="Цена за единицу")
     date = models.DateTimeField(verbose_name="Дата операции")
