@@ -2,8 +2,14 @@
 
 {% block content %}
 <style>
+    .profit-details {
+        opacity: 0;
+        visibility: hidden;
+        transition: all 0.2s ease;
+    }
     .profit-value-wrapper:hover .profit-details {
-        display: block !important;
+        opacity: 1;
+        visibility: visible;
     }
 </style>
 
@@ -59,7 +65,7 @@
                         <span class="fs-6 text-muted">RUB</span>
                     </h2>
 
-                    <div class="profit-details position-absolute bg-white shadow-lg rounded p-2 d-none" style="bottom: 100%; left: 50%; transform: translateX(-50%); margin-bottom: 5px; min-width: 220px; z-index: 1050; border: 1px solid #eef2f5;">
+                    <div class="profit-details position-absolute bg-white shadow-lg rounded p-2" style="bottom: 100%; left: 50%; transform: translateX(-50%); margin-bottom: 5px; min-width: 220px; z-index: 1050; border: 1px solid #eef2f5;">
                     <div style="font-size: small; line-height: 1.7;">
                         <div class="d-flex justify-content-between mb-0">
                             <span class="text-muted">Разница цен:</span>
