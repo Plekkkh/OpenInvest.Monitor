@@ -55,6 +55,75 @@
             z-index: 1030;
         }
 
+        /* 1. Базовый стиль навигационных кнопок (отступы и спокойный цвет текста) */
+        .navbar-island .nav-link, .navbar-island .btn-link.nav-link {
+            border-radius: 8px;
+            margin: 0 4px;
+            color: #57829c !important;
+            transition: all 0.2s ease;
+        }
+
+        /* 2. Появление серого островка и потемнение текста при наведении курсора */
+        .navbar-island .nav-link:hover,
+        .navbar-island .btn-link.nav-link:hover,
+        .navbar-island .dropdown:hover .nav-link {
+            background-color: #e9ecef;
+            color: #014072 !important;
+        }
+
+        /* 3. Стиль текущей активной страницы (заметная синяя подсветка с мягкой тенью) */
+        .navbar-island .nav-link.nav-island-active {
+            background-color: #e7f2fc !important;
+            color: #014072 !important;
+            box-shadow: 0 2px 12px rgba(149, 157, 165, 0.25);
+        }
+
+        /* Исключение: возвращаем кнопке "Выйти" красный цвет, перебивая общие правила !important */
+        .navbar-island .nav-link.text-danger, .navbar-island .btn-link.text-danger {
+            color: #dc3545 !important;
+        }
+        .navbar-island .nav-link.text-danger:hover, .navbar-island .btn-link.text-danger:hover {
+            color: #b02a37 !important;
+            background-color: #f8d7da; /* небольшая красноватая подсветка при наведении */
+        }
+
+        /* 4. Цвет текста для подпунктов внутри выпадающего меню */
+        .navbar-island .dropdown-item {
+            color: #57829c;
+        }
+
+        /* 5. Эффект наведения на подпункт внутри выпадающего меню */
+        .navbar-island .dropdown-item:hover {
+            background-color: #e9ecef;
+            color: #014072;
+        }
+
+        /* 6. Появление выпадающего меню без клика, только простым наведением мыши (отключается на смартфонах) */
+        .navbar-island .dropdown-menu {
+            box-shadow: 0 8px 24px rgba(149, 157, 165, 0.15) !important;
+            border-radius: 10px;
+            padding: 8px 0;
+        }
+
+        @media (min-width: 768px) {
+            .navbar-island .dropdown:hover .dropdown-menu {
+                display: block;
+                margin-top: 14px; /* Сдвигаем меню так, чтобы нижняя граница шапки совпадала с его началом */
+                padding-bottom: 14px;
+            }
+
+            /* Невидимый "мостик", чтобы меню не закрывалось, пока мышка летит через отступ */
+            .navbar-island .dropdown-menu::before {
+                content: "";
+                position: absolute;
+                top: -20px;
+                left: 0;
+                right: 0;
+                height: 20px;
+                background: transparent;
+            }
+        }
+
         h1, h2, h3, h4, h5, h6 {
             font-weight: 700;
         }
@@ -71,13 +140,32 @@
             <span class="navbar-toggler-icon"></span>
         </button>
         <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav me-auto ms-md-3 mb-2 mb-md-0 fw-semibold">
+                <li class="nav-item">
+                    <a class="nav-link px-3 {% if request.resolver_match.view_name == 'portfolio:dashboard' %}nav-island-active{% endif %}" href="{% url 'portfolio:dashboard' %}">Главная</a>
+                </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle px-3 {% if request.resolver_match.view_name == 'portfolio:transactions' %}nav-island-active{% endif %}" href="#" id="portfolioDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        Портфель
+                    </a>
+                    <ul class="dropdown-menu border-0 shadow-sm" aria-labelledby="portfolioDropdown">
+                        <li><a class="dropdown-item" href="#">Активы</a></li>
+                        <li><a class="dropdown-item {% if request.resolver_match.view_name == 'portfolio:transactions' %}bg-light fw-bold{% endif %}" href="{% url 'portfolio:transactions' %}">Операции</a></li>
+                    </ul>
+                </li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle px-3" href="#" id="analyticsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        Аналитика
+                    </a>
+                    <ul class="dropdown-menu border-0 shadow-sm" aria-labelledby="analyticsDropdown">
+                        <li><a class="dropdown-item" href="#">Таблица активов</a></li>
+                        <li><a class="dropdown-item" href="#">Диверсификация</a></li>
+                        <li><a class="dropdown-item" href="#">Метрики</a></li>
+                        <li><a class="dropdown-item" href="#">Бенчмарки</a></li>
+                    </ul>
+                </li>
+            </ul>
             <ul class="navbar-nav ms-auto mb-2 mb-md-0 fw-semibold">
-                <li class="nav-item">
-                    <a class="nav-link px-3" href="{% url 'portfolio:dashboard' %}">Главная</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link px-3" href="{% url 'portfolio:transactions' %}">Операции</a>
-                </li>
                 {% if user.is_authenticated %}
                 <li class="nav-item">
                     <form method="post" action="{% url 'users:logout' %}" class="d-inline">
@@ -87,7 +175,7 @@
                 </li>
                 {% else %}
                 <li class="nav-item">
-                    <a class="nav-link px-3" href="{% url 'users:login' %}">Войти</a>
+                    <a class="nav-link px-3 {% if request.resolver_match.view_name == 'users:login' %}nav-island-active{% endif %}" href="{% url 'users:login' %}">Войти</a>
                 </li>
                 {% endif %}
             </ul>
