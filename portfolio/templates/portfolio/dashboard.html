@@ -18,12 +18,12 @@
         transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out, filter 0.3s ease-in-out;
     }
     #allocation-chart.has-active-slice .apexcharts-pie-area {
-        opacity: 0.72;
+        opacity: 0.7;
     }
     #allocation-chart.has-active-slice .apexcharts-pie-area.is-hovered {
         opacity: 1;
-        transform: scale(1.022);
-        filter: brightness(1.02);
+        transform: scale(1.03);
+        filter: brightness(1.03);
     }
 </style>
 
@@ -211,11 +211,20 @@
                 const chartData = JSON.parse(chartDataElement.textContent);
 
                 if (chartData && chartData.values && chartData.values.length > 0) {
-                    const totalPortfolioValue = chartData.values.reduce((a, b) => a + b, 0);
+                    const realValues = chartData.values;
+                    const realTotal = realValues.reduce((a, b) => a + b, 0);
+                    const minSliceValue = realTotal > 0 ? realTotal * 0.005 : 0;
+                    const visualValues = realValues.map(val => Math.max(val, minSliceValue));
+                    const formatMoney = (value) => Number(value).toLocaleString('ru-RU', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                    });
+
                     const chartContainer = document.getElementById("allocation-chart");
 
                     if (!chartContainer) return;
 
+                    let chartInstance = null;
                     let activeSliceIndex = null;
                     const labelToSeriesIndex = new Map(
                         chartData.labels.map((label, index) => [String(label).trim(), index])
@@ -235,9 +244,14 @@
                         const slicePath = getSlicePath(index);
                         if (!slicePath) return;
                         slicePath.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+
+                        const tooltip = chartContainer.querySelector('.apexcharts-tooltip');
+                        if (tooltip) {
+                            tooltip.classList.remove('apexcharts-active');
+                        }
                     };
 
-                    const setActiveSlice = (index) => {
+                    const setActiveSlice = (index, syncTooltip = false) => {
                         if (activeSliceIndex === index) return;
 
                         if (activeSliceIndex !== null) {
@@ -251,30 +265,48 @@
                         if (activeSliceIndex !== null) {
                             const nextSlice = getSlicePath(activeSliceIndex);
                             if (nextSlice) {
-                                // Рендерим активный сектор поверх соседних, чтобы перекрытие выглядело аккуратно
-                                const sliceParent = nextSlice.parentNode;
-                                if (sliceParent) sliceParent.appendChild(nextSlice);
                                 nextSlice.classList.add('is-hovered');
                             }
                             chartContainer.classList.add('has-active-slice');
-                            triggerSliceTooltip(activeSliceIndex);
+                            if (syncTooltip) {
+                                triggerSliceTooltip(activeSliceIndex);
+                            }
                         } else {
                             chartContainer.classList.remove('has-active-slice');
+                        }
+
+                        updateDonutCenter(activeSliceIndex);
+                    };
+
+                    const updateDonutCenter = (index) => {
+                        const centerLabel = chartContainer.querySelector('.apexcharts-datalabel-label');
+                        const centerValue = chartContainer.querySelector('.apexcharts-datalabel-value');
+                        if (!centerValue) return;
+
+                        if (index !== null && index >= 0) {
+                            if (centerLabel) centerLabel.textContent = chartData.labels[index] || '';
+                            centerValue.textContent = `${formatMoney(realValues[index] || 0)} ₽`;
+                        } else {
+                            if (centerLabel) centerLabel.textContent = 'Всего';
+                            centerValue.textContent = `${formatMoney(realTotal)} ₽`;
                         }
                     };
 
                     const options = {
-                        series: chartData.values,
+                        series: visualValues,
                         labels: chartData.labels,
                         chart: {
                             type: 'donut',
                             height: 380,
                             events: {
                                 dataPointMouseEnter: function(event, chartContext, config) {
-                                    setActiveSlice(config.seriesIndex);
+                                    const hoveredIndex = typeof config.dataPointIndex === 'number'
+                                        ? config.dataPointIndex
+                                        : config.seriesIndex;
+                                    setActiveSlice(hoveredIndex, false);
                                 },
                                 dataPointMouseLeave: function() {
-                                    setActiveSlice(null);
+                                    setActiveSlice(null, false);
                                 }
                             },
                             animations: {
@@ -295,7 +327,7 @@
                         plotOptions: {
                             pie: {
                                 donut: {
-                                    size: '50%', // Больше центральное отверстие, чтобы масштаб не залезал на центральные значения
+                                    size: '50%',
                                     labels: {
                                         show: true,
                                         name: {
@@ -309,23 +341,22 @@
                                             fontSize: '24px',
                                             fontWeight: 700,
                                             color: '#212529',
-                                            formatter: function (val) {
-                                                return Number(val).toLocaleString('ru-RU', {
-                                                    minimumFractionDigits: 2, maximumFractionDigits: 2
-                                                }) + " ₽";
+                                            formatter: function () {
+                                                const displayVal = activeSliceIndex !== null
+                                                    ? (realValues[activeSliceIndex] || 0)
+                                                    : realTotal;
+                                                return `${formatMoney(displayVal)} ₽`;
                                             }
                                         },
                                         total: {
                                             show: true,
-                                            showAlways: true,
+                                            showAlways: false,
                                             label: 'Всего',
                                             fontSize: '14px',
                                             fontWeight: 600,
                                             color: '#6c757d',
-                                            formatter: function (w) {
-                                                return Number(totalPortfolioValue).toLocaleString('ru-RU', {
-                                                    minimumFractionDigits: 2, maximumFractionDigits: 2
-                                                }) + " ₽";
+                                            formatter: function () {
+                                                return `${formatMoney(realTotal)} ₽`;
                                             }
                                         }
                                     }
@@ -338,7 +369,7 @@
                         },
                         stroke: {
                             width: 1,
-                            colors: ['#ffffff'] // закругленные края сегментов разделяются белыми линиями
+                            colors: ['#ffffff']
                         },
                         tooltip: {
                             enabled: true,
@@ -350,9 +381,9 @@
                             },
                             y: {
                                 formatter: function(value, { seriesIndex }) {
-                                    const realVal = chartData.values[seriesIndex] || 0;
-                                    const percentage = totalPortfolioValue > 0
-                                        ? ((realVal / totalPortfolioValue) * 100).toFixed(1)
+                                    const realVal = realValues[seriesIndex] || 0;
+                                    const percentage = realTotal > 0
+                                        ? ((realVal / realTotal) * 100).toFixed(1)
                                         : '0.0';
                                     return Number(realVal).toLocaleString('ru-RU', {
                                         minimumFractionDigits: 2,
@@ -378,8 +409,10 @@
                         }
                     };
 
-                    const chartInstance = new ApexCharts(chartContainer, options);
-                    chartInstance.render();
+                    chartInstance = new ApexCharts(chartContainer, options);
+                    chartInstance.render().then(() => {
+                        updateDonutCenter(null);
+                    });
 
                     // Наведение по строкам таблицы подсвечивает соответствующий сегмент donut
                     const tableBody = document.querySelector("#portfolioTable tbody");
@@ -396,18 +429,18 @@
 
                             if (seriesIndex !== undefined) {
                                 row.addEventListener('mouseenter', () => {
-                                    setActiveSlice(seriesIndex);
+                                    setActiveSlice(seriesIndex, true);
                                 });
                             }
                         });
 
                         tableBody.addEventListener("mouseleave", () => {
-                            setActiveSlice(null);
+                            setActiveSlice(null, false);
                         });
                     }
 
                     chartContainer.addEventListener("mouseleave", () => {
-                        setActiveSlice(null);
+                        setActiveSlice(null, false);
                     });
                 }
             } catch (e) {
