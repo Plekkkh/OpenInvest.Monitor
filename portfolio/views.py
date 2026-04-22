@@ -48,7 +48,7 @@ class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
             profit_metrics = analytics.get_profit_metrics()
             portfolio_classes, labels, values = analytics.get_allocation_data()
 
-        except Exception:
+        except (ValueError, RuntimeError):
             logger.exception('Ошибка при подготовке данных для dashboard.')
             fallback = self._get_fallback_context()
             total_value = fallback['total_value']
