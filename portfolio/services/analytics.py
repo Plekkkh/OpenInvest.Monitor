@@ -1,6 +1,7 @@
 import pandas as pd
 import pyxirr
 import logging
+from decimal import Decimal
 from typing import Dict, Any, Optional, TypedDict
 from datetime import datetime
 
@@ -15,11 +16,11 @@ logger = logging.getLogger(__name__)
 
 class AllocationGroup(TypedDict):
     name: str
-    current_value: float
-    invested: float
-    yield_amount: float
-    share: float
-    yield_percent: float
+    current_value: Decimal
+    invested: Decimal
+    yield_amount: Decimal
+    share: Decimal
+    yield_percent: Decimal
 
 
 class AnalyticsService:
@@ -45,10 +46,19 @@ class AnalyticsService:
         df = pd.DataFrame(list(transactions))
         # Конвертация типов
         df['date'] = pd.to_datetime(df['date'])
-        df['quantity'] = df['quantity'].astype(float)
-        df['price_per_unit'] = df['price_per_unit'].astype(float)
+        df['quantity'] = df['quantity'].fillna(Decimal('0'))
+        df['price_per_unit'] = df['price_per_unit'].fillna(Decimal('0'))
         df['total_amount'] = df['quantity'] * df['price_per_unit']
         return df
+
+    @staticmethod
+    def _to_decimal(value: Any) -> Decimal:
+        """Безопасно приводит значение к Decimal для денежных расчетов."""
+        if isinstance(value, Decimal):
+            return value
+        if value is None:
+            return Decimal('0')
+        return Decimal(str(value))
 
     def get_current_portfolio_snapshot(self) -> Dict[str, Any]:
         """
@@ -67,7 +77,7 @@ class AnalyticsService:
         # Fallback для ручных счетов (Manual) - пока упрощенный, вернем 0
         # Для полноценного fallback потребуется запрашивать актуальные цены с рынка
         return {
-            'total_amount': 0.0,
+            'total_amount': Decimal('0'),
             'positions': [],
             'currencies': [],
             'updated_at': now()
@@ -107,12 +117,14 @@ class AnalyticsService:
         amounts = cash_flows_df['signed_amount'].tolist()
 
         snapshot = self.get_current_portfolio_snapshot()
-        current_value = snapshot.get('total_amount', 0.0)
+        current_value = self._to_decimal(snapshot.get('total_amount', Decimal('0')))
 
         # Добавляем текущую стоимость портфеля как финальный поток
         if current_value > 0:
             dates.append(now())
-            amounts.append(current_value)
+            amounts.append(float(current_value))
+
+        amounts = [float(amount) for amount in amounts]
 
         try:
             xirr_value = pyxirr.xirr(dates, amounts)
@@ -146,11 +158,11 @@ class AnalyticsService:
         groups: dict[str, AllocationGroup] = {
             name: {
                 'name': name,
-                'current_value': 0.0,
-                'invested': 0.0,
-                'yield_amount': 0.0,
-                'share': 0.0,
-                'yield_percent': 0.0,
+                'current_value': Decimal('0'),
+                'invested': Decimal('0'),
+                'yield_amount': Decimal('0'),
+                'share': Decimal('0'),
+                'yield_percent': Decimal('0'),
             }
             for name in asset_classes.values()
         }
@@ -162,17 +174,17 @@ class AnalyticsService:
             if class_name not in groups:
                 groups[class_name] = {
                     'name': class_name,
-                    'current_value': 0.0,
-                    'invested': 0.0,
-                    'yield_amount': 0.0,
-                    'share': 0.0,
-                    'yield_percent': 0.0,
+                    'current_value': Decimal('0'),
+                    'invested': Decimal('0'),
+                    'yield_amount': Decimal('0'),
+                    'share': Decimal('0'),
+                    'yield_percent': Decimal('0'),
                 }
 
-            qty = float(pos.get('quantity') or 0)
-            price = float(pos.get('current_price') or 0)
-            avg = float(pos.get('average_buy_price') or 0)
-            yld = float(pos.get('expected_yield') or 0)
+            qty = self._to_decimal(pos.get('quantity'))
+            price = self._to_decimal(pos.get('current_price'))
+            avg = self._to_decimal(pos.get('average_buy_price'))
+            yld = self._to_decimal(pos.get('expected_yield'))
 
             groups[class_name]['current_value'] += qty * price
             groups[class_name]['invested'] += qty * avg
@@ -180,11 +192,11 @@ class AnalyticsService:
 
         currencies = self.get_cash_balance()
         for cur in currencies:
-            bal = float(cur.get('balance') or 0)
+            bal = self._to_decimal(cur.get('balance'))
             groups['Валюта']['current_value'] += bal
             groups['Валюта']['invested'] += bal
 
-        total_portfolio_calc: float = sum(float(g['current_value']) for g in groups.values())
+        total_portfolio_calc = sum((g['current_value'] for g in groups.values()), Decimal('0'))
 
         labels = []
         values = []
@@ -194,10 +206,12 @@ class AnalyticsService:
             cv = g['current_value']
             if cv > 0 or g['invested'] > 0:
                 labels.append(g['name'])
-                values.append(cv)
+                values.append(float(cv))
 
-                g['share'] = (cv / total_portfolio_calc * 100) if total_portfolio_calc > 0 else 0.0
-                g['yield_percent'] = (g['yield_amount'] / g['invested'] * 100) if g['invested'] > 0 else 0.0
+                g['share'] = (cv / total_portfolio_calc * Decimal('100')) if total_portfolio_calc > 0 else Decimal('0')
+                g['yield_percent'] = (
+                    g['yield_amount'] / g['invested'] * Decimal('100')
+                ) if g['invested'] > 0 else Decimal('0')
                 portfolio_classes.append(g)
 
         portfolio_classes.sort(key=lambda x: x['share'], reverse=True)
@@ -207,10 +221,10 @@ class AnalyticsService:
         """Считает метрики на основе текущих позиций (nkd, ожидаемая доходность)"""
         positions = self.get_portfolio_positions()
         for pos in positions:
-            yield_val = pos.get('expected_yield') or 0.0
-            nkd_val = pos.get('current_nkd') or 0.0
-            metrics['asset_price_difference'] += float(yield_val)
-            metrics['aci'] += float(nkd_val)
+            yield_val = self._to_decimal(pos.get('expected_yield'))
+            nkd_val = self._to_decimal(pos.get('current_nkd'))
+            metrics['asset_price_difference'] += yield_val
+            metrics['aci'] += nkd_val
 
     def _calculate_transaction_metrics(self, metrics: dict) -> None:
         """Считает метрики на основе исторических транзакций"""
@@ -227,13 +241,13 @@ class AnalyticsService:
 
         for stat in stats:
             op_type = stat['operation_type']
-            total_sum = float(stat['total_sum'] or 0)
+            total_sum = self._to_decimal(stat['total_sum'])
 
             # Реализованная прибыль (от продаж/погашений)
-            metrics['realized_pnl'] += float(stat['total_yield'] or 0)
+            metrics['realized_pnl'] += self._to_decimal(stat['total_yield'])
 
             # Исторический НКД: платим (-), получаем (+)
-            aci_val = float(stat['total_aci'] or 0)
+            aci_val = self._to_decimal(stat['total_aci'])
             if op_type == 'buy':
                 metrics['aci'] -= aci_val
             elif op_type in ('sell', 'repayment'):
@@ -256,13 +270,13 @@ class AnalyticsService:
         Разница цен, начисления, налоги, комиссии, НКД, а также прибыль с продаж.
         """
         metrics = {
-            'asset_price_difference': 0.0,
-            'realized_pnl': 0.0,
-            'accruals': 0.0,
-            'taxes': 0.0,
-            'commissions': 0.0,
-            'aci': 0.0,
-            'total_profit': 0.0
+            'asset_price_difference': Decimal('0'),
+            'realized_pnl': Decimal('0'),
+            'accruals': Decimal('0'),
+            'taxes': Decimal('0'),
+            'commissions': Decimal('0'),
+            'aci': Decimal('0'),
+            'total_profit': Decimal('0')
         }
 
         self._calculate_position_metrics(metrics)

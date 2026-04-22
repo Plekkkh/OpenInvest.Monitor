@@ -365,7 +365,7 @@ class TInvestService:
 
                 currencies.append({
                     'currency': str(currency_name).lower(),
-                    'balance': float(self._quotation_to_decimal(pos.quantity))
+                    'balance': self._quotation_to_decimal(pos.quantity)
                 })
             else:
                 positions.append({
@@ -373,11 +373,11 @@ class TInvestService:
                     'instrument_uid': getattr(pos, 'instrument_uid', ''),
                     'ticker': getattr(pos, 'ticker', None) or getattr(pos, 'instrument_uid', pos.figi),
                     'instrument_type': instrument_type,
-                    'quantity': float(self._quotation_to_decimal(pos.quantity)),
-                    'average_buy_price': float(self._quotation_to_decimal(pos.average_position_price)),
-                    'current_price': float(self._quotation_to_decimal(pos.current_price)),
-                    'expected_yield': float(self._quotation_to_decimal(pos.expected_yield)),
-                    'current_nkd': float(self._quotation_to_decimal(pos.current_nkd)),
+                    'quantity': self._quotation_to_decimal(pos.quantity),
+                    'average_buy_price': self._quotation_to_decimal(pos.average_position_price),
+                    'current_price': self._quotation_to_decimal(pos.current_price),
+                    'expected_yield': self._quotation_to_decimal(pos.expected_yield),
+                    'current_nkd': self._quotation_to_decimal(pos.current_nkd),
                 })
         return positions, currencies
 
@@ -396,7 +396,7 @@ class TInvestService:
                 response = client.operations.get_portfolio(account_id=account_id)
                 positions, currencies = self._parse_positions_and_currencies(response.positions)
 
-                total_amount = float(self._quotation_to_decimal(response.total_amount_portfolio))
+                total_amount = self._quotation_to_decimal(response.total_amount_portfolio)
 
                 result = {
                     'account_id': account_id,
