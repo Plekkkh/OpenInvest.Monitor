@@ -7,7 +7,7 @@ from datetime import datetime
 from django.utils.timezone import now
 from django.db.models import Sum, F
 from portfolio.models import BrokerAccount, Transaction
-from portfolio.services.t_invest import TInvestService
+from portfolio.services.t_invest import TInvestService, TInvestServiceError
 
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ class AnalyticsService:
             try:
                 snapshot = self.api_service.get_portfolio()
                 return snapshot
-            except Exception:
+            except (TInvestServiceError, ValueError):
                 logger.exception('Не удалось получить снимок портфеля через API.')
 
         # Fallback для ручных счетов (Manual) - пока упрощенный, вернем 0
@@ -118,7 +118,8 @@ class AnalyticsService:
             xirr_value = pyxirr.xirr(dates, amounts)
             # Возвращаем значение в процентах (умножаем на 100)
             return float(xirr_value) * 100.0 if xirr_value is not None else 0.0
-        except Exception:
+        except (ValueError, TypeError, ArithmeticError):
+            logger.exception('Не удалось рассчитать XIRR для счета id=%s', self.account.id)
             return 0.0
 
     def calculate_twr(self) -> Optional[float]:
