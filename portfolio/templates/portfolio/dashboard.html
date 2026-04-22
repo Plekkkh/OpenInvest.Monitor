@@ -226,6 +226,8 @@
 
                     let chartInstance = null;
                     let activeSliceIndex = null;
+                    let centerAnimationFrameId = null;
+                    let currentDisplayValue = realTotal;
                     const labelToSeriesIndex = new Map(
                         chartData.labels.map((label, index) => [String(label).trim(), index])
                     );
@@ -278,6 +280,51 @@
                         updateDonutCenter(activeSliceIndex);
                     };
 
+                    const animateCenterValue = (targetValue) => {
+                        const centerValue = chartContainer.querySelector('.apexcharts-datalabel-value');
+                        if (!centerValue) return;
+
+                        if (centerAnimationFrameId !== null) {
+                            cancelAnimationFrame(centerAnimationFrameId);
+                            centerAnimationFrameId = null;
+                        }
+
+                        const startValue = currentDisplayValue;
+                        const endValue = Number(targetValue) || 0;
+
+                        if (Math.abs(endValue - startValue) < 0.005) {
+                            currentDisplayValue = endValue;
+                            centerValue.textContent = `${formatMoney(currentDisplayValue)} ₽`;
+                            return;
+                        }
+
+                        const duration = 260;
+                        const startTime = performance.now();
+
+                        const step = (now) => {
+                            const progress = Math.min((now - startTime) / duration, 1);
+                            const eased = 1 - Math.pow(1 - progress, 3);
+                            currentDisplayValue = startValue + (endValue - startValue) * eased;
+
+                            const currentCenterValue = chartContainer.querySelector('.apexcharts-datalabel-value');
+                            if (currentCenterValue) {
+                                currentCenterValue.textContent = `${formatMoney(currentDisplayValue)} ₽`;
+                            }
+
+                            if (progress < 1) {
+                                centerAnimationFrameId = requestAnimationFrame(step);
+                            } else {
+                                currentDisplayValue = endValue;
+                                if (currentCenterValue) {
+                                    currentCenterValue.textContent = `${formatMoney(currentDisplayValue)} ₽`;
+                                }
+                                centerAnimationFrameId = null;
+                            }
+                        };
+
+                        centerAnimationFrameId = requestAnimationFrame(step);
+                    };
+
                     const updateDonutCenter = (index) => {
                         const centerLabel = chartContainer.querySelector('.apexcharts-datalabel-label');
                         const centerValue = chartContainer.querySelector('.apexcharts-datalabel-value');
@@ -285,10 +332,10 @@
 
                         if (index !== null && index >= 0) {
                             if (centerLabel) centerLabel.textContent = chartData.labels[index] || '';
-                            centerValue.textContent = `${formatMoney(realValues[index] || 0)} ₽`;
+                            animateCenterValue(realValues[index] || 0);
                         } else {
                             if (centerLabel) centerLabel.textContent = 'Всего';
-                            centerValue.textContent = `${formatMoney(realTotal)} ₽`;
+                            animateCenterValue(realTotal);
                         }
                     };
 
@@ -342,10 +389,7 @@
                                             fontWeight: 700,
                                             color: '#212529',
                                             formatter: function () {
-                                                const displayVal = activeSliceIndex !== null
-                                                    ? (realValues[activeSliceIndex] || 0)
-                                                    : realTotal;
-                                                return `${formatMoney(displayVal)} ₽`;
+                                                return `${formatMoney(currentDisplayValue)} ₽`;
                                             }
                                         },
                                         total: {
@@ -356,7 +400,7 @@
                                             fontWeight: 600,
                                             color: '#6c757d',
                                             formatter: function () {
-                                                return `${formatMoney(realTotal)} ₽`;
+                                                return `${formatMoney(currentDisplayValue)} ₽`;
                                             }
                                         }
                                     }
@@ -411,6 +455,7 @@
 
                     chartInstance = new ApexCharts(chartContainer, options);
                     chartInstance.render().then(() => {
+                        currentDisplayValue = realTotal;
                         updateDonutCenter(null);
                     });
 
