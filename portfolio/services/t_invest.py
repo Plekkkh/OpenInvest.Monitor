@@ -62,6 +62,18 @@ class TInvestService:
     def _map_instrument_type(self, instrument_type: str) -> str:
         return INSTRUMENT_TYPE_MAPPING.get(instrument_type, 'Share')
 
+    @staticmethod
+    def _apply_asset_defaults(asset: Asset, defaults: dict[str, Any]) -> Asset:
+        """Обновляет поля актива только измененными значениями."""
+        updated_fields: list[str] = []
+        for key, value in defaults.items():
+            if value and getattr(asset, key) != value:
+                setattr(asset, key, value)
+                updated_fields.append(key)
+        if updated_fields:
+            asset.save(update_fields=updated_fields)
+        return asset
+
     def _build_instruments_index(self, instruments_cache: InstrumentsCache) -> dict[str, dict[str, Any]]:
         """
         Строит локальный O(1) индекс по всем инструментам.
@@ -81,6 +93,8 @@ class TInvestService:
                     # Сохраняем только необходимые поля в виде словаря для совместимости с Redis/Memcached
                     # и предотвращения ошибок сериализации
                     data = {
+                        'instrument_uid': getattr(inst, 'uid', None),
+                        'figi': getattr(inst, 'figi', None),
                         'ticker': inst.ticker,
                         'isin': getattr(inst, 'isin', ''),
                         'name': inst.name,
@@ -95,25 +109,52 @@ class TInvestService:
                 logger.warning("Ошибка при загрузке индекса инструментов (%s): %s", group_name, e)
         return index
 
-    def _resolve_asset(self, instrument_index: dict, figi: str, instrument_uid: str) -> Asset | None:
+    def _resolve_asset(
+        self,
+        instrument_index: dict[str, dict[str, Any]],
+        figi: str,
+        instrument_uid: str
+    ) -> Asset | None:
         """Получение или создание актива по figi/uid из плоского индекса"""
         if not figi and not instrument_uid:
             return None
 
         try:
             instrument = instrument_index.get(instrument_uid) or instrument_index.get(figi)
+            asset: Asset | None = None
+
+            if instrument_uid:
+                asset = Asset.objects.filter(instrument_uid=instrument_uid).first()
+            if not asset and figi:
+                asset = Asset.objects.filter(figi=figi).first()
 
             if instrument:
-                asset, created = Asset.objects.get_or_create(
-                    ticker=instrument['ticker'],
-                    defaults={
-                        'isin': instrument['isin'],
-                        'name': instrument['name'],
-                        'asset_type': self._map_instrument_type(instrument['instrument_type']),
-                        'currency': instrument['currency']
-                    }
+                defaults = {
+                    'instrument_uid': instrument.get('instrument_uid') or instrument_uid,
+                    'figi': instrument.get('figi') or figi,
+                    'ticker': instrument['ticker'],
+                    'isin': instrument['isin'],
+                    'name': instrument['name'],
+                    'asset_type': self._map_instrument_type(instrument['instrument_type']),
+                    'currency': instrument['currency']
+                }
+
+                if asset:
+                    return self._apply_asset_defaults(asset, defaults)
+
+                asset = Asset.objects.filter(ticker=defaults['ticker']).first()
+                if asset:
+                    return self._apply_asset_defaults(asset, defaults)
+
+                return Asset.objects.create(
+                    instrument_uid=defaults['instrument_uid'],
+                    figi=defaults['figi'],
+                    ticker=defaults['ticker'],
+                    isin=defaults['isin'],
+                    name=defaults['name'],
+                    asset_type=defaults['asset_type'],
+                    currency=defaults['currency']
                 )
-                return asset
         except Exception as e:
             logger.warning(
                 "Ошибка при получении инструмента (figi=%s, uid=%s): %s",
@@ -329,6 +370,7 @@ class TInvestService:
             else:
                 positions.append({
                     'figi': pos.figi,
+                    'instrument_uid': getattr(pos, 'instrument_uid', ''),
                     'ticker': getattr(pos, 'ticker', None) or getattr(pos, 'instrument_uid', pos.figi),
                     'instrument_type': instrument_type,
                     'quantity': float(self._quotation_to_decimal(pos.quantity)),
