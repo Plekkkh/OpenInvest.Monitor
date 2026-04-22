@@ -1,6 +1,7 @@
 import logging
 from decimal import Decimal
 from datetime import datetime, timezone
+from typing import Any
 from django.utils.timezone import is_aware, make_aware, now
 from django.core.cache import cache
 
@@ -23,6 +24,10 @@ from portfolio.models import BrokerAccount, Transaction, Asset
 
 
 logger = logging.getLogger(__name__)
+
+
+class TInvestServiceError(RuntimeError):
+    """Ошибка уровня сервиса при работе с API Т-Инвестиций."""
 
 
 class TInvestService:
@@ -57,7 +62,7 @@ class TInvestService:
     def _map_instrument_type(self, instrument_type: str) -> str:
         return INSTRUMENT_TYPE_MAPPING.get(instrument_type, 'Share')
 
-    def _build_instruments_index(self, instruments_cache: InstrumentsCache) -> dict:
+    def _build_instruments_index(self, instruments_cache: InstrumentsCache) -> dict[str, dict[str, Any]]:
         """
         Строит локальный O(1) индекс по всем инструментам.
 
@@ -135,6 +140,11 @@ class TInvestService:
         if not valid_accounts:
             raise ValueError("Брокерские счета с доступными правами не найдены.")
 
+        if len(valid_accounts) > 1:
+            raise ValueError(
+                "Найдено несколько счетов у брокера. Укажите provider_account_id для нужного счета."
+            )
+
         broker_account = valid_accounts[0]
         self.account.provider_account_id = broker_account.id
         self.account.save(update_fields=['provider_account_id'])
@@ -151,7 +161,7 @@ class TInvestService:
             logger.warning("Не удалось получить дату открытия счета %s: %s", account_id, e)
         return None
 
-    def _get_or_build_instruments_index(self, client) -> dict:
+    def _get_or_build_instruments_index(self, client) -> dict[str, dict[str, Any]]:
         CACHE_KEY = 't_invest_instruments_index'
         instrument_index = cache.get(CACHE_KEY)
 
@@ -184,7 +194,11 @@ class TInvestService:
         return operations_items
 
     def _process_and_save_operations(
-        self, operations_items, instrument_index: dict, from_date: datetime, to_date: datetime
+        self,
+        operations_items,
+        instrument_index: dict[str, dict[str, Any]],
+        from_date: datetime,
+        to_date: datetime
     ) -> int:
         existing_ids = set(Transaction.objects.filter(
             account=self.account,
@@ -288,9 +302,9 @@ class TInvestService:
 
         except Exception as e:
             logger.error("Ошибка при синхронизации операций: %s", str(e))
-            raise ValueError(f"Ошибка при синхронизации операций: {str(e)}")
+            raise TInvestServiceError(f"Ошибка при синхронизации операций: {str(e)}") from e
 
-    def _parse_positions_and_currencies(self, client_response_positions) -> tuple[list, list]:
+    def _parse_positions_and_currencies(self, client_response_positions) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Разбирает ответ API на позиции и валюты"""
         positions = []
         currencies = []
@@ -356,4 +370,4 @@ class TInvestService:
                 return result
         except Exception as e:
             logger.error("Ошибка при получении портфеля: %s", str(e))
-            raise ValueError(f"Ошибка при получении портфеля: {str(e)}")
+            raise TInvestServiceError(f"Ошибка при получении портфеля: {str(e)}") from e
