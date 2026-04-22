@@ -35,8 +35,8 @@
     {% if accounts %}
     <div class="col-auto">
         <form method="get" class="d-flex align-items-center bg-white rounded-pill px-3 py-2 shadow-sm" style="border: 1px solid #eef2f5;">
-            <label class="me-3 fw-bold text-muted small mb-0">ACCOUNT</label>
-            <select name="account_id" class="form-select form-select-sm border-0 shadow-none fw-semibold p-0 pe-4" style="background-color: transparent; cursor: pointer;" onchange="this.form.submit()">
+            <label for="account-selector" class="me-3 fw-bold text-muted small mb-0">ACCOUNT</label>
+            <select id="account-selector" name="account_id" class="form-select form-select-sm border-0 shadow-none fw-semibold p-0 pe-4" style="background-color: transparent; cursor: pointer;" onchange="this.form.submit()">
                 {% for acc in accounts %}
                 <option value="{{ acc.id }}" {% if account.id == acc.id %}selected{% endif %}>{{ acc.name }}</option>
                 {% endfor %}
@@ -224,7 +224,6 @@
 
                     if (!chartContainer) return;
 
-                    let chartInstance = null;
                     let activeSliceIndex = null;
                     let centerAnimationFrameId = null;
                     let currentDisplayValue = realTotal;
@@ -453,7 +452,7 @@
                         }
                     };
 
-                    chartInstance = new ApexCharts(chartContainer, options);
+                    const chartInstance = new ApexCharts(chartContainer, options);
                     chartInstance.render().then(() => {
                         currentDisplayValue = realTotal;
                         updateDonutCenter(null);

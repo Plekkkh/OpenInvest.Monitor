@@ -1,12 +1,25 @@
 import pandas as pd
 import pyxirr
-from typing import Dict, Any, Optional
+import logging
+from typing import Dict, Any, Optional, TypedDict
 from datetime import datetime
 
 from django.utils.timezone import now
 from django.db.models import Sum, F
 from portfolio.models import BrokerAccount, Transaction
 from portfolio.services.t_invest import TInvestService
+
+
+logger = logging.getLogger(__name__)
+
+
+class AllocationGroup(TypedDict):
+    name: str
+    current_value: float
+    invested: float
+    yield_amount: float
+    share: float
+    yield_percent: float
 
 
 class AnalyticsService:
@@ -17,7 +30,7 @@ class AnalyticsService:
         else:
             self.api_service = None
 
-    def _get_transactions_df(self, queryset=None) -> pd.DataFrame:
+    def _get_transactions_df(self, queryset: Optional[Any] = None) -> pd.DataFrame:
         """Получает транзакции из базы данных и конвертирует их в DataFrame."""
         if queryset is None:
             queryset = Transaction.objects.filter(account=self.account)
@@ -49,8 +62,7 @@ class AnalyticsService:
                 snapshot = self.api_service.get_portfolio()
                 return snapshot
             except Exception:
-                # В случае ошибки API возвращаем пустой снимок
-                pass
+                logger.exception('Не удалось получить снимок портфеля через API.')
 
         # Fallback для ручных счетов (Manual) - пока упрощенный, вернем 0
         # Для полноценного fallback потребуется запрашивать актуальные цены с рынка
@@ -88,13 +100,11 @@ class AnalyticsService:
         if cash_flows_df.empty:
             return 0.0
 
+        cash_flows_df['signed_amount'] = cash_flows_df['total_amount']
+        cash_flows_df.loc[cash_flows_df['operation_type'] == 'deposit', 'signed_amount'] *= -1
+
         dates = cash_flows_df['date'].tolist()
-        amounts = []
-        for _, row in cash_flows_df.iterrows():
-            if row['operation_type'] == 'deposit':
-                amounts.append(-row['total_amount'])
-            else:
-                amounts.append(row['total_amount'])
+        amounts = cash_flows_df['signed_amount'].tolist()
 
         snapshot = self.get_current_portfolio_snapshot()
         current_value = snapshot.get('total_amount', 0.0)
@@ -119,7 +129,7 @@ class AnalyticsService:
         """
         return None
 
-    def get_allocation_data(self) -> tuple[list, list, list]:
+    def get_allocation_data(self) -> tuple[list[AllocationGroup], list[str], list[float]]:
         """
         Возвращает данные для круговой диаграммы и таблицы классов активов:
         (portfolio_classes, labels, values)
@@ -132,8 +142,17 @@ class AnalyticsService:
             'crypto': 'Криптовалюта',
         }
 
-        groups = {name: {'name': name, 'current_value': 0.0, 'invested': 0.0, 'yield_amount': 0.0}
-                  for name in asset_classes.values()}
+        groups: dict[str, AllocationGroup] = {
+            name: {
+                'name': name,
+                'current_value': 0.0,
+                'invested': 0.0,
+                'yield_amount': 0.0,
+                'share': 0.0,
+                'yield_percent': 0.0,
+            }
+            for name in asset_classes.values()
+        }
 
         positions = self.get_portfolio_positions()
         for pos in positions:
@@ -141,7 +160,12 @@ class AnalyticsService:
             class_name = asset_classes.get(itype, 'Прочее')
             if class_name not in groups:
                 groups[class_name] = {
-                    'name': class_name, 'current_value': 0.0, 'invested': 0.0, 'yield_amount': 0.0
+                    'name': class_name,
+                    'current_value': 0.0,
+                    'invested': 0.0,
+                    'yield_amount': 0.0,
+                    'share': 0.0,
+                    'yield_percent': 0.0,
                 }
 
             qty = float(pos.get('quantity') or 0)
@@ -159,7 +183,7 @@ class AnalyticsService:
             groups['Валюта']['current_value'] += bal
             groups['Валюта']['invested'] += bal
 
-        total_portfolio_calc = sum(g['current_value'] for g in groups.values())
+        total_portfolio_calc: float = sum(float(g['current_value']) for g in groups.values())
 
         labels = []
         values = []
@@ -171,8 +195,8 @@ class AnalyticsService:
                 labels.append(g['name'])
                 values.append(cv)
 
-                g['share'] = (cv / total_portfolio_calc * 100) if total_portfolio_calc > 0 else 0
-                g['yield_percent'] = (g['yield_amount'] / g['invested'] * 100) if g['invested'] > 0 else 0
+                g['share'] = (cv / total_portfolio_calc * 100) if total_portfolio_calc > 0 else 0.0
+                g['yield_percent'] = (g['yield_amount'] / g['invested'] * 100) if g['invested'] > 0 else 0.0
                 portfolio_classes.append(g)
 
         portfolio_classes.sort(key=lambda x: x['share'], reverse=True)
@@ -254,7 +278,7 @@ class AnalyticsService:
         )
         return metrics
 
-    def get_portfolio_cash_flows(self, end_date: datetime = None) -> pd.DataFrame:
+    def get_portfolio_cash_flows(self, end_date: Optional[datetime] = None) -> pd.DataFrame:
         """
         Возвращает DataFrame всех вводов/выводов средств с датами
         """
@@ -273,14 +297,7 @@ class AnalyticsService:
         if cash_flows_df.empty:
             return pd.DataFrame(columns=['date', 'amount'])
 
-        # amount = price_per_unit * quantity (штук как правило 1, а цена - это сумма)
-        # Для вводов (Deposit) значение положительное, для выводов (Withdrawal) - отрицательное
-        def get_signed_amount(row):
-            total = float(row['price_per_unit']) * float(row['quantity'])
-            if row['operation_type'] == 'deposit':
-                return total
-            return -total
-
-        cash_flows_df['amount'] = cash_flows_df.apply(get_signed_amount, axis=1)
+        cash_flows_df['amount'] = cash_flows_df['total_amount']
+        cash_flows_df.loc[cash_flows_df['operation_type'] == 'withdrawal', 'amount'] *= -1
 
         return cash_flows_df[['date', 'amount']]

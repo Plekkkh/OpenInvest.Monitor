@@ -1,5 +1,6 @@
 from django.views.generic import TemplateView, ListView, CreateView
 from django.contrib.auth.mixins import LoginRequiredMixin
+import logging
 from portfolio.models import BrokerAccount, Transaction
 from portfolio.services.analytics import AnalyticsService
 from portfolio.mixins import OwnerRequiredMixin, CurrentAccountMixin
@@ -7,11 +8,14 @@ from django.urls import reverse_lazy
 from portfolio.forms import BrokerAccountForm
 
 
+logger = logging.getLogger(__name__)
+
+
 class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
     template_name = 'portfolio/dashboard.html'
 
     @staticmethod
-    def _get_fallback_context():
+    def _get_fallback_context() -> dict:
         return {
             'total_value': 0.0,
             'xirr_value': 0.0,
@@ -45,6 +49,7 @@ class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
             portfolio_classes, labels, values = analytics.get_allocation_data()
 
         except Exception:
+            logger.exception('Ошибка при подготовке данных для dashboard.')
             fallback = self._get_fallback_context()
             total_value = fallback['total_value']
             xirr_value = fallback['xirr_value']
