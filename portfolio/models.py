@@ -16,7 +16,21 @@ class Asset(models.Model):
         ('Currency', 'Валюта'),
     ]
 
-    ticker = models.CharField(max_length=20, unique=True, verbose_name="Тикер")
+    instrument_uid = models.CharField(
+        max_length=64,
+        unique=True,
+        blank=True,
+        null=True,
+        verbose_name="UID инструмента у брокера"
+    )
+    figi = models.CharField(
+        max_length=32,
+        unique=True,
+        blank=True,
+        null=True,
+        verbose_name="FIGI инструмента"
+    )
+    ticker = models.CharField(max_length=20, verbose_name="Тикер")
     isin = models.CharField(max_length=12, blank=True, null=True, verbose_name="ISIN")
     name = models.CharField(max_length=255, verbose_name="Название")
     asset_type = models.CharField(max_length=20, choices=TYPE_CHOICES, verbose_name="Тип актива")
