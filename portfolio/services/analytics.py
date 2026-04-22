@@ -17,9 +17,12 @@ class AnalyticsService:
         else:
             self.api_service = None
 
-    def _get_transactions_df(self) -> pd.DataFrame:
+    def _get_transactions_df(self, queryset=None) -> pd.DataFrame:
         """Получает транзакции из базы данных и конвертирует их в DataFrame."""
-        transactions = Transaction.objects.filter(account=self.account).values(
+        if queryset is None:
+            queryset = Transaction.objects.filter(account=self.account)
+
+        transactions = queryset.values(
             'date', 'operation_type', 'quantity', 'price_per_unit', 'asset__ticker', 'asset__asset_type'
         ).order_by('date')
 
@@ -115,6 +118,65 @@ class AnalyticsService:
         TODO
         """
         return None
+
+    def get_allocation_data(self) -> tuple[list, list, list]:
+        """
+        Возвращает данные для круговой диаграммы и таблицы классов активов:
+        (portfolio_classes, labels, values)
+        """
+        asset_classes = {
+            'share': 'Акции',
+            'bond': 'Облигации',
+            'etf': 'Фонды',
+            'currency': 'Валюта',
+            'crypto': 'Криптовалюта',
+        }
+
+        groups = {name: {'name': name, 'current_value': 0.0, 'invested': 0.0, 'yield_amount': 0.0}
+                  for name in asset_classes.values()}
+
+        positions = self.get_portfolio_positions()
+        for pos in positions:
+            itype = str(pos.get('instrument_type', '')).lower()
+            class_name = asset_classes.get(itype, 'Прочее')
+            if class_name not in groups:
+                groups[class_name] = {
+                    'name': class_name, 'current_value': 0.0, 'invested': 0.0, 'yield_amount': 0.0
+                }
+
+            qty = float(pos.get('quantity') or 0)
+            price = float(pos.get('current_price') or 0)
+            avg = float(pos.get('average_buy_price') or 0)
+            yld = float(pos.get('expected_yield') or 0)
+
+            groups[class_name]['current_value'] += qty * price
+            groups[class_name]['invested'] += qty * avg
+            groups[class_name]['yield_amount'] += yld
+
+        currencies = self.get_cash_balance()
+        for cur in currencies:
+            bal = float(cur.get('balance') or 0)
+            groups['Валюта']['current_value'] += bal
+            groups['Валюта']['invested'] += bal
+
+        total_portfolio_calc = sum(g['current_value'] for g in groups.values())
+
+        labels = []
+        values = []
+        portfolio_classes = []
+
+        for g in groups.values():
+            cv = g['current_value']
+            if cv > 0 or g['invested'] > 0:
+                labels.append(g['name'])
+                values.append(cv)
+
+                g['share'] = (cv / total_portfolio_calc * 100) if total_portfolio_calc > 0 else 0
+                g['yield_percent'] = (g['yield_amount'] / g['invested'] * 100) if g['invested'] > 0 else 0
+                portfolio_classes.append(g)
+
+        portfolio_classes.sort(key=lambda x: x['share'], reverse=True)
+        return portfolio_classes, labels, values
 
     def _calculate_position_metrics(self, metrics: dict) -> None:
         """Считает метрики на основе текущих позиций (nkd, ожидаемая доходность)"""
