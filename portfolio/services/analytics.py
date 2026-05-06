@@ -6,7 +6,7 @@ from typing import Dict, Any, Optional, TypedDict
 from datetime import datetime
 
 from django.utils.timezone import now
-from django.db.models import Sum, F
+from django.db.models import Sum, F, Q, QuerySet
 from portfolio.models import BrokerAccount, Transaction
 from portfolio.services.t_invest import TInvestService, TInvestServiceError
 
@@ -24,12 +24,80 @@ class AllocationGroup(TypedDict):
 
 
 class AnalyticsService:
+    _main_operation_types = {
+        'buy',
+        'sell',
+        'deposit',
+        'withdrawal',
+        'other_income',
+        'other_expense',
+    }
+
     def __init__(self, account: BrokerAccount):
         self.account = account
         if account.provider_type == 'T-Invest_API':
             self.api_service = TInvestService(account)
         else:
             self.api_service = None
+
+    def get_transactions_queryset(self, search_query: str = '', operation_type: str = 'all') -> QuerySet:
+        """
+        Возвращает queryset операций по счету с применением серверных фильтров.
+
+        Args:
+            search_query: Поисковая строка по активу и типу операции.
+            operation_type: Тип операции из UI-фильтра.
+
+        Returns:
+            QuerySet: Отфильтрованный queryset транзакций.
+        """
+        queryset = Transaction.objects.filter(account=self.account).select_related('account', 'asset').order_by('-date')
+        queryset = self._apply_search_filter(queryset, search_query)
+        queryset = self._apply_operation_type_filter(queryset, operation_type)
+        return queryset
+
+    def _apply_search_filter(self, queryset: QuerySet, search_query: str) -> QuerySet:
+        """Ищет по тикеру, названию актива и типу операции."""
+        query = search_query.strip()
+        if not query:
+            return queryset
+
+        query_lower = query.lower()
+        matched_operation_types = [
+            code for code, label in Transaction.OPERATION_CHOICES
+            if query_lower in code.lower() or query_lower in label.lower()
+        ]
+
+        search_filter = (
+            Q(asset__ticker__icontains=query) |
+            Q(asset__name__icontains=query) |
+            Q(operation_type__icontains=query)
+        )
+
+        if matched_operation_types:
+            search_filter |= Q(operation_type__in=matched_operation_types)
+
+        return queryset.filter(search_filter)
+
+    def _apply_operation_type_filter(self, queryset: QuerySet, operation_type: str) -> QuerySet:
+        """Фильтрует список по пользовательскому селектору категорий."""
+        normalized_type = operation_type.strip().lower()
+
+        if normalized_type in ('', 'all'):
+            return queryset
+
+        if normalized_type == 'buy':
+            return queryset.filter(operation_type='buy')
+        if normalized_type == 'sell':
+            return queryset.filter(operation_type='sell')
+        if normalized_type == 'deposit':
+            return queryset.filter(operation_type__in=['deposit', 'other_income'])
+        if normalized_type == 'withdrawal':
+            return queryset.filter(operation_type__in=['withdrawal', 'other_expense'])
+        if normalized_type == 'other':
+            return queryset.exclude(operation_type__in=self._main_operation_types)
+
+        return queryset
 
     def _get_transactions_df(self, queryset: Optional[Any] = None) -> pd.DataFrame:
         """Получает транзакции из базы данных и конвертирует их в DataFrame."""
@@ -316,3 +384,74 @@ class AnalyticsService:
         cash_flows_df.loc[cash_flows_df['operation_type'] == 'withdrawal', 'amount'] *= -1
 
         return cash_flows_df[['date', 'amount']]
+
+    @staticmethod
+    def get_category_totals(queryset) -> dict[str, str]:
+        """
+        Агрегирует операции по 7 основным категориям для дэшборда/истории операций.
+        Использует БД для подсчета (O(1) по передаче данных).
+        """
+        from django.db.models import Sum, F, Case, When, DecimalField
+
+        totals = queryset.aggregate(
+            buy_sum=Sum(
+                Case(
+                    When(operation_type='buy', then=F('quantity') * F('price_per_unit')),
+                    default=0,
+                    output_field=DecimalField()
+                )
+            ),
+            sell_sum=Sum(
+                Case(
+                    When(operation_type='sell', then=F('quantity') * F('price_per_unit')),
+                    default=0,
+                    output_field=DecimalField()
+                )
+            ),
+            commission_sum=Sum(
+                Case(
+                    When(operation_type__in=['commission', 'conversion_commission'], then=F('quantity') * F('price_per_unit')),
+                    default=0,
+                    output_field=DecimalField()
+                )
+            ),
+            accrual_sum=Sum(
+                Case(
+                    When(operation_type__in=['dividend', 'coupon', 'amortization', 'other_accrual'], then=F('quantity') * F('price_per_unit')),
+                    default=0,
+                    output_field=DecimalField()
+                )
+            ),
+            tax_sum=Sum(
+                Case(
+                    When(operation_type__in=['tax', 'tax_refund'], then=F('quantity') * F('price_per_unit')),
+                    default=0,
+                    output_field=DecimalField()
+                )
+            ),
+            deposit_sum=Sum(
+                Case(
+                    When(operation_type__in=['deposit', 'other_income'], then=F('quantity') * F('price_per_unit')),
+                    default=0,
+                    output_field=DecimalField()
+                )
+            ),
+            withdrawal_sum=Sum(
+                Case(
+                    When(operation_type__in=['withdrawal', 'other_expense'], then=F('quantity') * F('price_per_unit')),
+                    default=0,
+                    output_field=DecimalField()
+                )
+            )
+        )
+
+        return {
+            'buy': f"{float(totals['buy_sum'] or 0):.2f}",
+            'sell': f"{float(totals['sell_sum'] or 0):.2f}",
+            'commission': f"{float(totals['commission_sum'] or 0):.2f}",
+            'accrual': f"{float(totals['accrual_sum'] or 0):.2f}",
+            'tax': f"{float(totals['tax_sum'] or 0):.2f}",
+            'deposit': f"{float(totals['deposit_sum'] or 0):.2f}",
+            'withdrawal': f"{float(totals['withdrawal_sum'] or 0):.2f}"
+        }
+

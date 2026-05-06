@@ -1,57 +1,210 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="row mb-5 align-items-center">
-    <div class="col">
-        <h2 class="mb-0">Transactions History</h2>
-    </div>
+<style>
+    .transactions-toolbar {
+        border: 1px solid #eef2f5;
+    }
+    .summary-tile {
+        border: 1px solid #eef2f5;
+        border-radius: 16px;
+        background: #fff;
+    }
+    .summary-balance-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 1rem;
+    }
+    .summary-balance-item {
+        border: 1px solid #eef2f5;
+        border-radius: 12px;
+        background: #f8f9fa;
+        padding: 1rem;
+    }
+    .summary-balance-item .label {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #6c757d;
+        margin-bottom: 0.25rem;
+    }
+    .summary-balance-item .value {
+        font-size: 1.15rem;
+        font-weight: 700;
+    }
+    .table-sticky thead th {
+        background: #fff;
+    }
+    .sortable {
+        cursor: pointer;
+        user-select: none;
+        white-space: nowrap;
+    }
+    .sortable .sort-icon {
+        opacity: 0.5;
+        font-size: 0.75rem;
+    }
+    .sortable.is-active .sort-icon {
+        opacity: 1;
+    }
+    .op-badge {
+        font-weight: 600;
+        border-radius: 999px;
+        padding: 0.35rem 0.75rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+    .op-badge::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        display: inline-block;
+        background: currentColor;
+    }
+    .row-hidden {
+        display: none;
+    }
+    .focus-ring:focus {
+        outline: 2px solid #3b82f6;
+        outline-offset: 2px;
+    }
+</style>
 
-    {% if accounts %}
-    <div class="col-auto">
-        <form method="get" class="d-flex align-items-center bg-white rounded-pill px-3 py-2 shadow-sm" style="border: 1px solid #eef2f5;">
-            <label class="me-3 fw-bold text-muted small mb-0">FILTER</label>
-            <select name="account_id" class="form-select form-select-sm border-0 shadow-none fw-semibold p-0 pe-4" style="background-color: transparent; cursor: pointer;" onchange="this.form.submit()">
-                <option value="">All Accounts</option>
-                {% for acc in accounts %}
-                <option value="{{ acc.id }}" {% if current_account and current_account.id == acc.id %}selected{% endif %}>{{ acc.name }}</option>
-                {% endfor %}
-            </select>
-            <button type="submit" class="d-none">Filter</button>
-        </form>
+<div class="row mb-4 align-items-center">
+    <div class="col">
+        <h2 class="mb-1">История операций</h2>
+        <p class="text-muted mb-0 small">Отслеживайте сделки, пополнения и списания по выбранному счету.</p>
     </div>
-    {% endif %}
 </div>
 
-<div class="card p-2">
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body py-3">
+        {% if accounts %}
+        <form method="get" id="transactions-filters">
+            <div class="row g-3 align-items-end">
+                <div class="col-lg-5">
+                    <label for="account-filter" class="form-label text-muted small fw-bold mb-1">СЧЕТ</label>
+                    <select id="account-filter" name="account_id" class="form-select form-select-sm border-0 shadow-none fw-semibold p-0 pe-4 transactions-toolbar rounded-pill px-3 py-2 bg-white" style="background-color: transparent; cursor: pointer;" aria-label="Фильтр по счету">
+                        <option value="">Все счета</option>
+                        {% for acc in accounts %}
+                        <option value="{{ acc.id }}" {% if current_account and current_account.id == acc.id %}selected{% endif %}>{{ acc.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-lg-4">
+                    <label for="txn-search" class="form-label text-muted small fw-bold mb-1">ПОИСК</label>
+                    <input id="txn-search" name="q" value="{{ search_query }}" class="form-control form-control-sm focus-ring" type="text" placeholder="Тикер, актив, тип" aria-label="Поиск по операциям">
+                </div>
+                <div class="col-lg-3">
+                    <label for="type-filter" class="form-label text-muted small fw-bold mb-1">ТИП</label>
+                    <select id="type-filter" name="operation_type" class="form-select form-select-sm focus-ring" aria-label="Фильтр по типу операции">
+                        <option value="all" {% if selected_operation_type == 'all' %}selected{% endif %}>Все типы</option>
+                        <option value="buy" {% if selected_operation_type == 'buy' %}selected{% endif %}>Покупка</option>
+                        <option value="sell" {% if selected_operation_type == 'sell' %}selected{% endif %}>Продажа</option>
+                        <option value="deposit" {% if selected_operation_type == 'deposit' %}selected{% endif %}>Пополнение</option>
+                        <option value="withdrawal" {% if selected_operation_type == 'withdrawal' %}selected{% endif %}>Вывод</option>
+                        <option value="other" {% if selected_operation_type == 'other' %}selected{% endif %}>Прочее</option>
+                    </select>
+                </div>
+                {% if querystring %}
+                <div class="col-12 text-end">
+                    <a href="{% url 'portfolio:transactions' %}" class="small text-decoration-none text-muted">Сбросить фильтры</a>
+                </div>
+                {% endif %}
+            </div>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row g-3 mb-4" id="txn-summary" aria-live="polite">
+    <div class="col-12">
+        <div class="summary-tile p-4 h-100">
+            <div class="d-flex justify-content-between align-items-start mb-4">
+                <div>
+                    <h5 class="mb-1 fw-bold text-dark">Итоги по счету</h5>
+                    <p class="text-muted small mb-0">Найдено операций: <span id="summary-count-display">{{ filtered_count }}</span></p>
+                </div>
+                <button class="btn btn-light btn-sm rounded-pill px-3 fw-bold text-primary shadow-sm" id="summary-toggle-btn" aria-expanded="false" style="border: 1px solid #eef2f5;">
+                    Показать все ↓
+                </button>
+            </div>
+            <div class="summary-balance-grid" id="balance-summary">
+                <!-- Основные 3 категории -->
+                <div class="summary-balance-item bg-white" data-global-total="{{ category_totals.buy }}">
+                    <div class="label text-danger">Покупка</div>
+                    <div class="value text-danger" data-summary-key="buy">{{ category_totals.buy }} RUB</div>
+                </div>
+                <div class="summary-balance-item bg-white" data-global-total="{{ category_totals.sell }}">
+                    <div class="label text-success">Продажа</div>
+                    <div class="value text-success" data-summary-key="sell">{{ category_totals.sell }} RUB</div>
+                </div>
+                <div class="summary-balance-item bg-white" data-global-total="{{ category_totals.commission }}">
+                    <div class="label text-secondary">Комиссия</div>
+                    <div class="value text-secondary" data-summary-key="commission">{{ category_totals.commission }} RUB</div>
+                </div>
+
+                <!-- Скрытые категории -->
+                <div class="summary-balance-item bg-white extra-category d-none" data-global-total="{{ category_totals.accrual }}">
+                    <div class="label text-primary">Начисления</div>
+                    <div class="value text-primary" data-summary-key="accrual">{{ category_totals.accrual }} RUB</div>
+                </div>
+                <div class="summary-balance-item bg-white extra-category d-none" data-global-total="{{ category_totals.tax }}">
+                    <div class="label text-warning">Налог</div>
+                    <div class="value text-warning" data-summary-key="tax">{{ category_totals.tax }} RUB</div>
+                </div>
+                <div class="summary-balance-item bg-white extra-category d-none" data-global-total="{{ category_totals.deposit }}">
+                    <div class="label text-info">Пополнение</div>
+                    <div class="value text-info" data-summary-key="deposit">{{ category_totals.deposit }} RUB</div>
+                </div>
+                <div class="summary-balance-item bg-white extra-category d-none" data-global-total="{{ category_totals.withdrawal }}">
+                    <div class="label text-dark">Вывод средств</div>
+                    <div class="value text-dark" data-summary-key="withdrawal">{{ category_totals.withdrawal }} RUB</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card p-2 border-0 shadow-sm">
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0 border-0">
-                <thead class="text-muted small text-uppercase" style="letter-spacing: 0.5px; background: transparent;">
+            <table class="table table-hover align-middle mb-0 border-0 table-sticky" id="transactionsTable">
+                <thead class="text-muted small text-uppercase" style="letter-spacing: 0.5px;">
                     <tr>
-                        <th scope="col" class="border-bottom-0 ps-4 py-3">Date</th>
-                        <th scope="col" class="border-bottom-0 py-3">Account</th>
-                        <th scope="col" class="border-bottom-0 py-3">Type</th>
-                        <th scope="col" class="border-bottom-0 py-3">Asset</th>
-                        <th scope="col" class="border-bottom-0 text-end py-3">Quantity</th>
-                        <th scope="col" class="border-bottom-0 text-end py-3">Price</th>
-                        <th scope="col" class="border-bottom-0 text-end pe-4 py-3">Total Amount</th>
+                        <th scope="col" class="border-bottom-0 ps-4 py-3 sortable" data-sort="date">Дата <span class="sort-icon"></span></th>
+                        <th scope="col" class="border-bottom-0 py-3 sortable" data-sort="account">Счет <span class="sort-icon"></span></th>
+                        <th scope="col" class="border-bottom-0 py-3 sortable" data-sort="type">Тип <span class="sort-icon"></span></th>
+                        <th scope="col" class="border-bottom-0 py-3 sortable" data-sort="asset">Актив <span class="sort-icon"></span></th>
+                        <th scope="col" class="border-bottom-0 text-end py-3 sortable" data-sort="quantity">Количество <span class="sort-icon"></span></th>
+                        <th scope="col" class="border-bottom-0 text-end py-3 sortable" data-sort="price">Цена <span class="sort-icon"></span></th>
+                        <th scope="col" class="border-bottom-0 text-end pe-4 py-3 sortable" data-sort="total">Сумма <span class="sort-icon"></span></th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="transactionsBody">
                     {% for txn in transactions %}
-                    <tr class="align-middle">
-                        <td class="text-nowrap ps-4 border-top border-light">{{ txn.date|date:"d M Y, H:i" }}</td>
+                    <tr class="align-middle txn-row"
+                        data-date="{{ txn.date|date:'c' }}"
+                        data-account="{{ txn.account.name|lower }}"
+                        data-type="{{ txn.operation_type|lower }}"
+                        data-type-display="{{ txn.get_operation_type_display|lower }}"
+                        data-asset="{% if txn.asset %}{{ txn.asset.ticker|lower }} {{ txn.asset.name|lower }}{% endif %}"
+                        data-category="{% if txn.operation_type|lower == 'buy' %}buy{% elif txn.operation_type|lower == 'sell' %}sell{% elif txn.operation_type|lower == 'commission' or txn.operation_type|lower == 'conversion_commission' %}commission{% elif txn.operation_type|lower == 'dividend' or txn.operation_type|lower == 'coupon' or txn.operation_type|lower == 'amortization' or txn.operation_type|lower == 'other_accrual' %}accrual{% elif txn.operation_type|lower == 'tax' or txn.operation_type|lower == 'tax_refund' %}tax{% elif txn.operation_type|lower == 'deposit' or txn.operation_type|lower == 'other_income' %}deposit{% elif txn.operation_type|lower == 'withdrawal' or txn.operation_type|lower == 'other_expense' %}withdrawal{% else %}other{% endif %}"
+                        data-quantity="{{ txn.quantity }}"
+                        data-price="{{ txn.price_per_unit }}"
+                        data-total="{{ txn.total_amount }}">
+                        <td class="text-nowrap ps-4 border-top border-light">{{ txn.date|date:"d.m.Y, H:i" }}</td>
                         <td class="border-top border-light fw-semibold">{{ txn.account.name }}</td>
                         <td class="border-top border-light">
-                            {% if txn.operation_type == 'Buy' or txn.operation_type == 'Deposit' %}
-                                <span class="badge rounded-pill text-success bg-success bg-opacity-10 px-3 py-2 fw-semibold">
-                            {% elif txn.operation_type == 'Sell' or txn.operation_type == 'Withdrawal' %}
-                                <span class="badge rounded-pill text-danger bg-danger bg-opacity-10 px-3 py-2 fw-semibold">
+                            {% if txn.operation_type|lower == 'buy' or txn.operation_type|lower == 'deposit' %}
+                                <span class="op-badge text-danger bg-danger bg-opacity-10">{{ txn.get_operation_type_display }}</span>
+                            {% elif txn.operation_type|lower == 'sell' or txn.operation_type|lower == 'withdrawal' %}
+                                <span class="op-badge text-success bg-success bg-opacity-10">{{ txn.get_operation_type_display }}</span>
                             {% else %}
-                                <span class="badge rounded-pill text-secondary bg-secondary bg-opacity-10 px-3 py-2 fw-semibold">
+                                <span class="op-badge text-secondary bg-secondary bg-opacity-10">{{ txn.get_operation_type_display }}</span>
                             {% endif %}
-                                {{ txn.get_operation_type_display }}
-                            </span>
                         </td>
                         <td class="border-top border-light">
                             {% if txn.asset %}
@@ -63,13 +216,11 @@
                         </td>
                         <td class="text-end border-top border-light">{{ txn.quantity|floatformat:4 }}</td>
                         <td class="text-end border-top border-light">{{ txn.price_per_unit|floatformat:4 }} <small class="text-muted">RUB</small></td>
-                        <td class="text-end pe-4 border-top border-light fw-bold">
-                            {{ txn.total_amount|floatformat:2 }} <small class="text-muted fw-normal">RUB</small>
-                        </td>
+                        <td class="text-end pe-4 border-top border-light fw-bold">{{ txn.total_amount|floatformat:2 }} <small class="text-muted fw-normal">RUB</small></td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="7" class="text-center py-5 text-muted border-top border-light">No transactions found.</td>
+                        <td colspan="7" class="text-center py-5 text-muted border-top border-light">Операции не найдены.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -78,22 +229,134 @@
     </div>
 </div>
 
-<!-- Pagination -->
 {% if is_paginated %}
-<nav aria-label="Page navigation" class="mt-5">
+<nav aria-label="Навигация по страницам" class="mt-4">
     <ul class="pagination justify-content-center border-0 gap-2">
         {% if page_obj.has_previous %}
-            <li class="page-item"><a class="page-link border-0 rounded-circle text-dark shadow-sm" href="?page=1{% if request.GET.account_id %}&account_id={{ request.GET.account_id }}{% endif %}">&laquo;</a></li>
-            <li class="page-item"><a class="page-link border-0 rounded-pill text-dark shadow-sm px-3" href="?page={{ page_obj.previous_page_number }}{% if request.GET.account_id %}&account_id={{ request.GET.account_id }}{% endif %}">Prev</a></li>
+            <li class="page-item"><a class="page-link border-0 rounded-circle text-dark shadow-sm" href="?page=1{% if querystring %}&{{ querystring }}{% endif %}" aria-label="Первая страница">&laquo;</a></li>
+            <li class="page-item"><a class="page-link border-0 rounded-pill text-dark shadow-sm px-3" href="?page={{ page_obj.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}">Назад</a></li>
         {% endif %}
 
-        <li class="page-item disabled"><span class="page-link border-0 rounded-pill bg-dark text-white shadow-sm px-4">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span></li>
+        <li class="page-item disabled"><span class="page-link border-0 rounded-pill bg-dark text-white shadow-sm px-4">Стр. {{ page_obj.number }} из {{ page_obj.paginator.num_pages }}</span></li>
 
         {% if page_obj.has_next %}
-            <li class="page-item"><a class="page-link border-0 rounded-pill text-dark shadow-sm px-3" href="?page={{ page_obj.next_page_number }}{% if request.GET.account_id %}&account_id={{ request.GET.account_id }}{% endif %}">Next</a></li>
-            <li class="page-item"><a class="page-link border-0 rounded-circle text-dark shadow-sm" href="?page={{ page_obj.paginator.num_pages }}{% if request.GET.account_id %}&account_id={{ request.GET.account_id }}{% endif %}">&raquo;</a></li>
+            <li class="page-item"><a class="page-link border-0 rounded-pill text-dark shadow-sm px-3" href="?page={{ page_obj.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}">Вперед</a></li>
+            <li class="page-item"><a class="page-link border-0 rounded-circle text-dark shadow-sm" href="?page={{ page_obj.paginator.num_pages }}{% if querystring %}&{{ querystring }}{% endif %}" aria-label="Последняя страница">&raquo;</a></li>
         {% endif %}
     </ul>
 </nav>
 {% endif %}
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const table = document.getElementById('transactionsTable');
+        const tbody = document.getElementById('transactionsBody');
+        if (!table || !tbody) return;
+
+        const filterForm = document.getElementById('transactions-filters');
+        const searchInput = document.getElementById('txn-search');
+        const typeFilter = document.getElementById('type-filter');
+        const accountFilter = document.getElementById('account-filter');
+        const rows = Array.from(tbody.querySelectorAll('tr.txn-row'));
+
+        const summaryToggleBtn = document.getElementById('summary-toggle-btn');
+
+        let sortKey = 'date';
+        let sortAsc = false;
+
+        const parseNum = (v) => Number.parseFloat(v || '0') || 0;
+
+        const compareRows = (a, b) => {
+            const key = sortKey;
+            let av;
+            let bv;
+
+            if (key === 'date') {
+                av = new Date(a.dataset.date).getTime();
+                bv = new Date(b.dataset.date).getTime();
+            } else if (key === 'quantity' || key === 'price' || key === 'total') {
+                av = parseNum(a.dataset[key]);
+                bv = parseNum(b.dataset[key]);
+            } else if (key === 'type') {
+                av = (a.dataset.typeDisplay || '').toLowerCase();
+                bv = (b.dataset.typeDisplay || '').toLowerCase();
+            } else {
+                av = (a.dataset[key] || '').toLowerCase();
+                bv = (b.dataset[key] || '').toLowerCase();
+            }
+
+            if (av < bv) return sortAsc ? -1 : 1;
+            if (av > bv) return sortAsc ? 1 : -1;
+            return 0;
+        };
+
+        // Toggle для показа всех категорий
+        const extraCategories = document.querySelectorAll('.extra-category');
+        if (summaryToggleBtn && extraCategories.length > 0) {
+            summaryToggleBtn.addEventListener('click', () => {
+                const isHidden = extraCategories[0].classList.contains('d-none');
+                extraCategories.forEach(item => item.classList.toggle('d-none'));
+
+                summaryToggleBtn.setAttribute('aria-expanded', isHidden);
+                summaryToggleBtn.textContent = isHidden ? 'Скрыть ↑' : 'Показать все ↓';
+            });
+        }
+
+        if (filterForm) {
+            let searchTimer = null;
+
+            const submitFilters = () => filterForm.submit();
+
+            if (searchInput) {
+                searchInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        submitFilters();
+                    }
+                });
+            }
+
+            if (typeFilter) {
+                typeFilter.addEventListener('change', submitFilters);
+            }
+
+            if (accountFilter) {
+                accountFilter.addEventListener('change', submitFilters);
+            }
+        }
+
+        const headers = Array.from(table.querySelectorAll('th.sortable'));
+        headers.forEach((header) => {
+            header.addEventListener('click', () => {
+                const nextKey = header.dataset.sort;
+                if (sortKey === nextKey) {
+                    sortAsc = !sortAsc;
+                } else {
+                    sortKey = nextKey;
+                    sortAsc = nextKey === 'account' || nextKey === 'asset' || nextKey === 'type';
+                }
+
+                headers.forEach((h) => {
+                    h.classList.remove('is-active');
+                    const icon = h.querySelector('.sort-icon');
+                    if (icon) icon.innerHTML = '';
+                });
+
+                header.classList.add('is-active');
+                const icon = header.querySelector('.sort-icon');
+                if (icon) icon.innerHTML = sortAsc ? '&#9650;' : '&#9660;';
+
+                rows.sort(compareRows);
+                rows.forEach((row) => tbody.appendChild(row));
+            });
+        });
+
+        const initialHeader = table.querySelector('th.sortable[data-sort="date"]');
+        if (initialHeader) {
+            initialHeader.classList.add('is-active');
+            const icon = initialHeader.querySelector('.sort-icon');
+            if (icon) icon.innerHTML = '&#9660;';
+        }
+    });
+</script>
 {% endblock %}

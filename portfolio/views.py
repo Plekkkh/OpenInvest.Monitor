@@ -74,14 +74,44 @@ class TransactionListView(LoginRequiredMixin, OwnerRequiredMixin, CurrentAccount
     paginate_by = 20
 
     def get_queryset(self):
-        # Base check from OwnerRequiredMixin handles security.
-        queryset = super().get_queryset()
+        account = self.get_current_account()
+        if not account:
+            return super().get_queryset().none()
+
+        analytics = AnalyticsService(account)
+        return analytics.get_transactions_queryset(
+            search_query=self.request.GET.get('q', ''),
+            operation_type=self.request.GET.get('operation_type', 'all'),
+        )
+
+    def get_context_data(self, **kwargs):
+        """Добавляет агрегированные суммы по категориям и параметры фильтрации."""
+        context = super().get_context_data(**kwargs)
 
         account = self.get_current_account()
         if account:
-            return queryset.filter(account=account).select_related('asset').order_by('-date')
+            analytics = AnalyticsService(account)
+            context['category_totals'] = AnalyticsService.get_category_totals(analytics.get_transactions_queryset())
+            context['filtered_count'] = self.get_queryset().count()
+        else:
+            context['category_totals'] = {
+                'buy': '0.00',
+                'sell': '0.00',
+                'commission': '0.00',
+                'accrual': '0.00',
+                'tax': '0.00',
+                'deposit': '0.00',
+                'withdrawal': '0.00',
+            }
+            context['filtered_count'] = 0
 
-        return queryset.none()
+        query_params = self.request.GET.copy()
+        query_params.pop('page', None)
+        context['querystring'] = query_params.urlencode()
+        context['search_query'] = self.request.GET.get('q', '').strip()
+        context['selected_operation_type'] = self.request.GET.get('operation_type', 'all').strip().lower() or 'all'
+
+        return context
 
 
 class AccountCreateView(LoginRequiredMixin, CreateView):
