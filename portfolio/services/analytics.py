@@ -128,12 +128,156 @@ class AnalyticsService:
             return Decimal('0')
         return Decimal(str(value))
 
+    @staticmethod
+    def _demo_price_multiplier(asset_type: str) -> Decimal:
+        """Возвращает демонстрационный множитель цены для ручного портфеля.
+
+        Args:
+            asset_type: Тип актива.
+
+        Returns:
+            Decimal: Коэффициент для расчета текущей цены.
+        """
+        multipliers = {
+            'share': Decimal('1.12'),
+            'bond': Decimal('1.05'),
+            'etf': Decimal('1.08'),
+            'currency': Decimal('1.00'),
+        }
+        return multipliers.get(asset_type.lower(), Decimal('1.06'))
+
+    def _build_manual_portfolio_snapshot(self) -> Dict[str, Any]:
+        """Собирает локальный снимок портфеля для счетов ручного ввода.
+
+        Returns:
+            Dict[str, Any]: Снимок портфеля в формате, совместимом с T-Invest API.
+        """
+        transactions = Transaction.objects.filter(account=self.account).select_related('asset')
+        if not transactions.exists():
+            return {
+                'total_amount': Decimal('0'),
+                'positions': [],
+                'currencies': [],
+                'updated_at': now(),
+            }
+
+        rows = list(
+            transactions.values(
+                'asset_id',
+                'asset__figi',
+                'asset__instrument_uid',
+                'asset__ticker',
+                'asset__name',
+                'asset__asset_type',
+                'asset__currency',
+                'operation_type',
+                'quantity',
+                'price_per_unit',
+                'yield_amount',
+                'commission_amount',
+                'accrued_int',
+            )
+        )
+
+        if not rows:
+            return {
+                'total_amount': Decimal('0'),
+                'positions': [],
+                'currencies': [],
+                'updated_at': now(),
+            }
+
+        df = pd.DataFrame(rows)
+        df['quantity'] = df['quantity'].fillna(Decimal('0'))
+        df['price_per_unit'] = df['price_per_unit'].fillna(Decimal('0'))
+        df['amount'] = df['quantity'] * df['price_per_unit']
+
+        cash_signs = {
+            'deposit': Decimal('1'),
+            'withdrawal': Decimal('-1'),
+            'buy': Decimal('-1'),
+            'sell': Decimal('1'),
+            'repayment': Decimal('1'),
+            'dividend': Decimal('1'),
+            'coupon': Decimal('1'),
+            'amortization': Decimal('1'),
+            'other_accrual': Decimal('1'),
+            'commission': Decimal('-1'),
+            'conversion_commission': Decimal('-1'),
+            'tax': Decimal('-1'),
+            'tax_refund': Decimal('1'),
+            'expense': Decimal('-1'),
+            'other_income': Decimal('1'),
+            'other_expense': Decimal('-1'),
+            'conversion': Decimal('0'),
+        }
+        df['cash_sign'] = df['operation_type'].map(cash_signs).fillna(Decimal('0'))
+        df['cash_delta'] = df['amount'] * df['cash_sign']
+
+        positions: list[dict[str, Any]] = []
+        asset_df = df[df['asset_id'].notna() & df['operation_type'].isin(['buy', 'sell'])].copy()
+
+        if not asset_df.empty:
+            grouped = asset_df.groupby(
+                ['asset_id', 'asset__ticker', 'asset__name', 'asset__asset_type', 'asset__currency'],
+                dropna=False,
+            )
+
+            for _, group in grouped:
+                buy_rows = group[group['operation_type'] == 'buy']
+                sell_rows = group[group['operation_type'] == 'sell']
+
+                buy_quantity = self._to_decimal(buy_rows['quantity'].sum())
+                sell_quantity = self._to_decimal(sell_rows['quantity'].sum())
+                net_quantity = buy_quantity - sell_quantity
+
+                if net_quantity <= 0:
+                    continue
+
+                buy_amount = self._to_decimal(buy_rows['amount'].sum())
+                average_buy_price = buy_amount / buy_quantity if buy_quantity > 0 else Decimal('0')
+
+                asset_type = str(group.iloc[0]['asset__asset_type'] or '').lower()
+                current_price = average_buy_price * self._demo_price_multiplier(asset_type)
+                current_value = net_quantity * current_price
+                invested = net_quantity * average_buy_price
+
+                positions.append({
+                    'figi': group.iloc[0]['asset__figi'] or group.iloc[0]['asset__ticker'],
+                    'instrument_uid': group.iloc[0]['asset__instrument_uid'] or group.iloc[0]['asset__ticker'],
+                    'ticker': group.iloc[0]['asset__ticker'],
+                    'instrument_type': asset_type,
+                    'quantity': net_quantity,
+                    'average_buy_price': average_buy_price,
+                    'current_price': current_price,
+                    'expected_yield': current_value - invested,
+                    'current_nkd': self._to_decimal(group['accrued_int'].sum()) if asset_type == 'bond' else Decimal('0'),
+                })
+
+        cash_balance = self._to_decimal(df['cash_delta'].sum())
+        currencies = []
+        if cash_balance > 0:
+            currencies.append({
+                'currency': 'rub',
+                'balance': cash_balance,
+            })
+
+        total_amount = sum((pos['quantity'] * pos['current_price'] for pos in positions), Decimal('0')) + cash_balance
+
+        return {
+            'account_id': self.account.pk,
+            'total_amount': total_amount,
+            'positions': positions,
+            'currencies': currencies,
+            'updated_at': now(),
+        }
+
     def get_current_portfolio_snapshot(self) -> Dict[str, Any]:
         """
         Возвращает текущую оценку портфеля.
         Если доступен API Т-Инвестиций, использует его метод get_portfolio().
-        Для счетов ручного ввода используется fallback-механизм (пока возвращает 0,
-        в будущем можно реализовать расчет по базе).
+        Для счетов ручного ввода используется локальный fallback по транзакциям,
+        чтобы демо-данные тоже отображались на дашборде.
         """
         if self.api_service:
             try:
@@ -142,14 +286,7 @@ class AnalyticsService:
             except (TInvestServiceError, ValueError):
                 logger.exception('Не удалось получить снимок портфеля через API.')
 
-        # Fallback для ручных счетов (Manual) - пока упрощенный, вернем 0
-        # Для полноценного fallback потребуется запрашивать актуальные цены с рынка
-        return {
-            'total_amount': Decimal('0'),
-            'positions': [],
-            'currencies': [],
-            'updated_at': now()
-        }
+        return self._build_manual_portfolio_snapshot()
 
     def get_portfolio_positions(self) -> list:
         """Возвращает список текущих позиций из снимка портфеля."""

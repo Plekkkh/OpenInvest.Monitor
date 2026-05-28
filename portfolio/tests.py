@@ -476,3 +476,26 @@ class TransactionAjaxViewTests(TestCase):
         self.assertIn('pagination_html', payload)
 
 
+class DemoPortfolioSeedCommandTests(TestCase):
+    """Проверяет создание демонстрационных данных для дашборда."""
+
+    def test_seed_demo_portfolio_creates_dashboard_data(self) -> None:
+        """Команда сидирования должна создавать заполненный демо-портфель."""
+        call_command('seed_demo_portfolio', verbosity=0)
+
+        account = BrokerAccount.objects.get(user__username='123', name='Test_Inv')
+        service = AnalyticsService(account)
+        snapshot = service.get_current_portfolio_snapshot()
+        labels = service.get_allocation_data()[1]
+
+        self.assertEqual(account.provider_type, 'Manual')
+        self.assertGreater(Asset.objects.count(), 0)
+        self.assertGreater(Transaction.objects.filter(account=account).count(), 0)
+        self.assertGreater(snapshot['total_amount'], Decimal('0'))
+        self.assertTrue(snapshot['positions'])
+        self.assertTrue(snapshot['currencies'])
+        self.assertIn('Акции', labels)
+        self.assertIn('Облигации', labels)
+        self.assertIn('Валюта', labels)
+
+
