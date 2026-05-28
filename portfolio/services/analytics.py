@@ -199,7 +199,7 @@ class AnalyticsService:
             # Возвращаем значение в процентах (умножаем на 100)
             return float(xirr_value) * 100.0 if xirr_value is not None else 0.0
         except (ValueError, TypeError, ArithmeticError):
-            logger.exception('Не удалось рассчитать XIRR для счета id=%s', self.account.id)
+            logger.exception('Не удалось рассчитать XIRR для счета id=%s', self.account.pk)
             return 0.0
 
     def calculate_twr(self) -> Optional[float]:

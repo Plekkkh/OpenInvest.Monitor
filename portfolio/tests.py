@@ -1,5 +1,6 @@
 from django.test import TestCase
 from django.test import RequestFactory
+from django.core.management import call_command
 from decimal import Decimal
 from datetime import timedelta
 import json
@@ -337,7 +338,7 @@ class TInvestServiceTests(TestCase):
 
         child_tx = Transaction.objects.get(external_id='op-child')
         parent_tx = Transaction.objects.get(external_id='op-parent')
-        self.assertEqual(child_tx.parent_transaction_id, parent_tx.id)
+        self.assertEqual(getattr(child_tx, 'parent_transaction_id'), getattr(parent_tx, 'pk'))
         self.assertEqual(child_tx.asset.ticker, 'AAPL')
 
     def test_sync_operations_skips_duplicate_items(self) -> None:
@@ -405,7 +406,7 @@ class CurrentAccountMixinTests(TestCase):
             provider_type='Manual'
         )
 
-        request = RequestFactory().get('/', {'account_id': foreign_account.id})
+        request = RequestFactory().get('/', {'account_id': foreign_account.pk})
         request.user = user
 
         class DummyView(CurrentAccountMixin):
@@ -424,7 +425,7 @@ class CurrentAccountMixinTests(TestCase):
             provider_type='Manual'
         )
 
-        request = RequestFactory().get('/', {'account_id': account.id})
+        request = RequestFactory().get('/', {'account_id': account.pk})
         request.user = user
 
         class DummyView(CurrentAccountMixin):
@@ -462,14 +463,14 @@ class TransactionAjaxViewTests(TestCase):
             date=now(),
         )
 
-        request = RequestFactory().get('/', {'account_id': account.id, 'ajax': '1'}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        request = RequestFactory().get('/', {'account_id': account.pk, 'ajax': '1'}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         request.user = user
 
         response = TransactionListView.as_view()(request)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers.get('Content-Type'), 'application/json')
-        payload = json.loads(response.content.decode('utf-8'))
+        payload = json.loads(getattr(response, 'content').decode('utf-8'))
         self.assertIn('summary_html', payload)
         self.assertIn('rows_html', payload)
         self.assertIn('pagination_html', payload)
