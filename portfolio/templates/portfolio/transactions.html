@@ -82,7 +82,7 @@
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body py-3">
         {% if accounts %}
-        <form method="get" id="transactions-filters">
+        <form method="get" id="transactions-filters" data-default-account-id="{{ current_account.id|default:'' }}">
             <div class="row g-3 align-items-end">
                 <div class="col-lg-5">
                     <label for="account-filter" class="form-label text-muted small fw-bold mb-1">СЧЕТ</label>
@@ -108,65 +108,16 @@
                         <option value="other" {% if selected_operation_type == 'other' %}selected{% endif %}>Прочее</option>
                     </select>
                 </div>
-                {% if querystring %}
                 <div class="col-12 text-end">
-                    <a href="{% url 'portfolio:transactions' %}" class="small text-decoration-none text-muted">Сбросить фильтры</a>
+                    <a href="{% url 'portfolio:transactions' %}" id="reset-filters-link" class="small text-decoration-none text-muted {% if not querystring %}d-none{% endif %}">Сбросить фильтры</a>
                 </div>
-                {% endif %}
             </div>
         </form>
         {% endif %}
     </div>
 </div>
 
-<div class="row g-3 mb-4" id="txn-summary" aria-live="polite">
-    <div class="col-12">
-        <div class="summary-tile p-4 h-100">
-            <div class="d-flex justify-content-between align-items-start mb-4">
-                <div>
-                    <h5 class="mb-1 fw-bold text-dark">Итоги по счету</h5>
-                    <p class="text-muted small mb-0">Найдено операций: <span id="summary-count-display">{{ filtered_count }}</span></p>
-                </div>
-                <button class="btn btn-light btn-sm rounded-pill px-3 fw-bold text-primary shadow-sm" id="summary-toggle-btn" aria-expanded="false" style="border: 1px solid #eef2f5;">
-                    Показать все ↓
-                </button>
-            </div>
-            <div class="summary-balance-grid" id="balance-summary">
-                <!-- Основные 3 категории -->
-                <div class="summary-balance-item bg-white" data-global-total="{{ category_totals.buy }}">
-                    <div class="label text-danger">Покупка</div>
-                    <div class="value text-danger" data-summary-key="buy">{{ category_totals.buy }} RUB</div>
-                </div>
-                <div class="summary-balance-item bg-white" data-global-total="{{ category_totals.sell }}">
-                    <div class="label text-success">Продажа</div>
-                    <div class="value text-success" data-summary-key="sell">{{ category_totals.sell }} RUB</div>
-                </div>
-                <div class="summary-balance-item bg-white" data-global-total="{{ category_totals.commission }}">
-                    <div class="label text-secondary">Комиссия</div>
-                    <div class="value text-secondary" data-summary-key="commission">{{ category_totals.commission }} RUB</div>
-                </div>
-
-                <!-- Скрытые категории -->
-                <div class="summary-balance-item bg-white extra-category d-none" data-global-total="{{ category_totals.accrual }}">
-                    <div class="label text-primary">Начисления</div>
-                    <div class="value text-primary" data-summary-key="accrual">{{ category_totals.accrual }} RUB</div>
-                </div>
-                <div class="summary-balance-item bg-white extra-category d-none" data-global-total="{{ category_totals.tax }}">
-                    <div class="label text-warning">Налог</div>
-                    <div class="value text-warning" data-summary-key="tax">{{ category_totals.tax }} RUB</div>
-                </div>
-                <div class="summary-balance-item bg-white extra-category d-none" data-global-total="{{ category_totals.deposit }}">
-                    <div class="label text-info">Пополнение</div>
-                    <div class="value text-info" data-summary-key="deposit">{{ category_totals.deposit }} RUB</div>
-                </div>
-                <div class="summary-balance-item bg-white extra-category d-none" data-global-total="{{ category_totals.withdrawal }}">
-                    <div class="label text-dark">Вывод средств</div>
-                    <div class="value text-dark" data-summary-key="withdrawal">{{ category_totals.withdrawal }} RUB</div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
+{% include 'portfolio/partials/transactions_summary.html' %}
 
 <div class="card p-2 border-0 shadow-sm">
     <div class="card-body p-0">
@@ -184,68 +135,16 @@
                     </tr>
                 </thead>
                 <tbody id="transactionsBody">
-                    {% for txn in transactions %}
-                    <tr class="align-middle txn-row"
-                        data-date="{{ txn.date|date:'c' }}"
-                        data-account="{{ txn.account.name|lower }}"
-                        data-type="{{ txn.operation_type|lower }}"
-                        data-type-display="{{ txn.get_operation_type_display|lower }}"
-                        data-asset="{% if txn.asset %}{{ txn.asset.ticker|lower }} {{ txn.asset.name|lower }}{% endif %}"
-                        data-category="{% if txn.operation_type|lower == 'buy' %}buy{% elif txn.operation_type|lower == 'sell' %}sell{% elif txn.operation_type|lower == 'commission' or txn.operation_type|lower == 'conversion_commission' %}commission{% elif txn.operation_type|lower == 'dividend' or txn.operation_type|lower == 'coupon' or txn.operation_type|lower == 'amortization' or txn.operation_type|lower == 'other_accrual' %}accrual{% elif txn.operation_type|lower == 'tax' or txn.operation_type|lower == 'tax_refund' %}tax{% elif txn.operation_type|lower == 'deposit' or txn.operation_type|lower == 'other_income' %}deposit{% elif txn.operation_type|lower == 'withdrawal' or txn.operation_type|lower == 'other_expense' %}withdrawal{% else %}other{% endif %}"
-                        data-quantity="{{ txn.quantity }}"
-                        data-price="{{ txn.price_per_unit }}"
-                        data-total="{{ txn.total_amount }}">
-                        <td class="text-nowrap ps-4 border-top border-light">{{ txn.date|date:"d.m.Y, H:i" }}</td>
-                        <td class="border-top border-light fw-semibold">{{ txn.account.name }}</td>
-                        <td class="border-top border-light">
-                            {% if txn.operation_type|lower == 'buy' or txn.operation_type|lower == 'deposit' %}
-                                <span class="op-badge text-danger bg-danger bg-opacity-10">{{ txn.get_operation_type_display }}</span>
-                            {% elif txn.operation_type|lower == 'sell' or txn.operation_type|lower == 'withdrawal' %}
-                                <span class="op-badge text-success bg-success bg-opacity-10">{{ txn.get_operation_type_display }}</span>
-                            {% else %}
-                                <span class="op-badge text-secondary bg-secondary bg-opacity-10">{{ txn.get_operation_type_display }}</span>
-                            {% endif %}
-                        </td>
-                        <td class="border-top border-light">
-                            {% if txn.asset %}
-                                <span class="fw-bold">{{ txn.asset.ticker }}</span>
-                                <br><small class="text-muted">{{ txn.asset.name }}</small>
-                            {% else %}
-                                <span class="text-muted">—</span>
-                            {% endif %}
-                        </td>
-                        <td class="text-end border-top border-light">{{ txn.quantity|floatformat:4 }}</td>
-                        <td class="text-end border-top border-light">{{ txn.price_per_unit|floatformat:4 }} <small class="text-muted">RUB</small></td>
-                        <td class="text-end pe-4 border-top border-light fw-bold">{{ txn.total_amount|floatformat:2 }} <small class="text-muted fw-normal">RUB</small></td>
-                    </tr>
-                    {% empty %}
-                    <tr>
-                        <td colspan="7" class="text-center py-5 text-muted border-top border-light">Операции не найдены.</td>
-                    </tr>
-                    {% endfor %}
+                    {% include 'portfolio/partials/transactions_rows.html' %}
                 </tbody>
             </table>
         </div>
     </div>
 </div>
 
-{% if is_paginated %}
-<nav aria-label="Навигация по страницам" class="mt-4">
-    <ul class="pagination justify-content-center border-0 gap-2">
-        {% if page_obj.has_previous %}
-            <li class="page-item"><a class="page-link border-0 rounded-circle text-dark shadow-sm" href="?page=1{% if querystring %}&{{ querystring }}{% endif %}" aria-label="Первая страница">&laquo;</a></li>
-            <li class="page-item"><a class="page-link border-0 rounded-pill text-dark shadow-sm px-3" href="?page={{ page_obj.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}">Назад</a></li>
-        {% endif %}
-
-        <li class="page-item disabled"><span class="page-link border-0 rounded-pill bg-dark text-white shadow-sm px-4">Стр. {{ page_obj.number }} из {{ page_obj.paginator.num_pages }}</span></li>
-
-        {% if page_obj.has_next %}
-            <li class="page-item"><a class="page-link border-0 rounded-pill text-dark shadow-sm px-3" href="?page={{ page_obj.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}">Вперед</a></li>
-            <li class="page-item"><a class="page-link border-0 rounded-circle text-dark shadow-sm" href="?page={{ page_obj.paginator.num_pages }}{% if querystring %}&{{ querystring }}{% endif %}" aria-label="Последняя страница">&raquo;</a></li>
-        {% endif %}
-    </ul>
-</nav>
-{% endif %}
+<div id="transactions-pagination-container">
+    {% include 'portfolio/partials/transactions_pagination.html' %}
+</div>
 
 <script>
     document.addEventListener('DOMContentLoaded', function () {
@@ -257,14 +156,16 @@
         const searchInput = document.getElementById('txn-search');
         const typeFilter = document.getElementById('type-filter');
         const accountFilter = document.getElementById('account-filter');
-        const rows = Array.from(tbody.querySelectorAll('tr.txn-row'));
+        const paginationContainer = document.getElementById('transactions-pagination-container');
+        const resetFiltersLink = document.getElementById('reset-filters-link');
+        const defaultAccountId = filterForm ? (filterForm.dataset.defaultAccountId || '') : '';
 
-        const summaryToggleBtn = document.getElementById('summary-toggle-btn');
+        const parseNum = (v) => Number.parseFloat(v || '0') || 0;
 
         let sortKey = 'date';
         let sortAsc = false;
 
-        const parseNum = (v) => Number.parseFloat(v || '0') || 0;
+        const getRows = () => Array.from(tbody.querySelectorAll('tr.txn-row'));
 
         const compareRows = (a, b) => {
             const key = sortKey;
@@ -290,40 +191,102 @@
             return 0;
         };
 
-        // Toggle для показа всех категорий
-        const extraCategories = document.querySelectorAll('.extra-category');
-        if (summaryToggleBtn && extraCategories.length > 0) {
+        const sortRows = () => {
+            const rows = getRows();
+            rows.sort(compareRows);
+            rows.forEach(row => tbody.appendChild(row));
+        };
+
+        const bindSummaryToggle = () => {
+            const summaryToggleBtn = document.getElementById('summary-toggle-btn');
+            const extraCategories = document.querySelectorAll('.extra-category');
+            if (!summaryToggleBtn || extraCategories.length === 0) return;
+
             summaryToggleBtn.addEventListener('click', () => {
                 const isHidden = extraCategories[0].classList.contains('d-none');
                 extraCategories.forEach(item => item.classList.toggle('d-none'));
-
                 summaryToggleBtn.setAttribute('aria-expanded', isHidden);
                 summaryToggleBtn.textContent = isHidden ? 'Скрыть ↑' : 'Показать все ↓';
             });
-        }
+        };
 
-        if (filterForm) {
-            let searchTimer = null;
-
-            const submitFilters = () => filterForm.submit();
-
-            if (searchInput) {
-                searchInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        submitFilters();
-                    }
+        const buildParams = (overrideParams) => {
+            const params = new URLSearchParams();
+            if (filterForm) {
+                new FormData(filterForm).forEach((value, key) => {
+                    params.set(key, value);
                 });
             }
-
-            if (typeFilter) {
-                typeFilter.addEventListener('change', submitFilters);
+            if (overrideParams) {
+                overrideParams.forEach((value, key) => params.set(key, value));
             }
+            params.set('ajax', '1');
+            return params;
+        };
 
-            if (accountFilter) {
-                accountFilter.addEventListener('change', submitFilters);
+        const updateUrl = (params) => {
+            const cleanParams = new URLSearchParams(params);
+            cleanParams.delete('ajax');
+            if (cleanParams.get('q') === '') {
+                cleanParams.delete('q');
             }
-        }
+            if (cleanParams.get('account_id') === '' || cleanParams.get('account_id') === defaultAccountId) {
+                cleanParams.delete('account_id');
+            }
+            if (!cleanParams.get('operation_type') || cleanParams.get('operation_type') === 'all') {
+                cleanParams.delete('operation_type');
+            }
+            const query = cleanParams.toString();
+            const url = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+            window.history.replaceState({}, '', url);
+        };
+
+        const updateResetLink = (params) => {
+            if (!resetFiltersLink) return;
+            const cleanParams = new URLSearchParams(params);
+            cleanParams.delete('ajax');
+            if (cleanParams.get('q') === '') {
+                cleanParams.delete('q');
+            }
+            if (cleanParams.get('account_id') === '' || cleanParams.get('account_id') === defaultAccountId) {
+                cleanParams.delete('account_id');
+            }
+            if (!cleanParams.get('operation_type') || cleanParams.get('operation_type') === 'all') {
+                cleanParams.delete('operation_type');
+            }
+            const hasFilters = cleanParams.toString().length > 0;
+            resetFiltersLink.classList.toggle('d-none', !hasFilters);
+        };
+
+        const fetchTransactions = (overrideParams) => {
+            if (!filterForm) return;
+            const params = buildParams(overrideParams);
+
+            fetch(`${window.location.pathname}?${params.toString()}`, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            })
+                .then(response => response.json())
+                .then((data) => {
+                    tbody.innerHTML = data.rows_html;
+                    const summary = document.getElementById('txn-summary');
+                    if (summary) {
+                        summary.outerHTML = data.summary_html;
+                    }
+                    if (paginationContainer) {
+                        paginationContainer.innerHTML = data.pagination_html;
+                    }
+                    bindSummaryToggle();
+                    sortRows();
+                    updateUrl(params);
+                    updateResetLink(params);
+                })
+                .catch(() => {
+                    filterForm.submit();
+                });
+        };
+
+        bindSummaryToggle();
+        updateResetLink(buildParams());
 
         const headers = Array.from(table.querySelectorAll('th.sortable'));
         headers.forEach((header) => {
@@ -338,24 +301,60 @@
 
                 headers.forEach((h) => {
                     h.classList.remove('is-active');
-                    const icon = h.querySelector('.sort-icon');
-                    if (icon) icon.innerHTML = '';
+                    h.querySelector('.sort-icon').textContent = '';
                 });
 
                 header.classList.add('is-active');
-                const icon = header.querySelector('.sort-icon');
-                if (icon) icon.innerHTML = sortAsc ? '&#9650;' : '&#9660;';
-
-                rows.sort(compareRows);
-                rows.forEach((row) => tbody.appendChild(row));
+                header.querySelector('.sort-icon').textContent = sortAsc ? '▲' : '▼';
+                sortRows();
             });
         });
 
-        const initialHeader = table.querySelector('th.sortable[data-sort="date"]');
-        if (initialHeader) {
-            initialHeader.classList.add('is-active');
-            const icon = initialHeader.querySelector('.sort-icon');
-            if (icon) icon.innerHTML = '&#9660;';
+        if (filterForm) {
+            let searchTimer = null;
+
+            const submitFilters = (overrideParams) => {
+                if (searchTimer) {
+                    clearTimeout(searchTimer);
+                }
+                fetchTransactions(overrideParams);
+            };
+
+            if (searchInput) {
+                searchInput.addEventListener('input', () => {
+                    if (searchTimer) {
+                        clearTimeout(searchTimer);
+                    }
+                    searchTimer = setTimeout(() => submitFilters(), 350);
+                });
+
+                searchInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        submitFilters();
+                    }
+                });
+            }
+
+            if (typeFilter) {
+                typeFilter.addEventListener('change', () => submitFilters());
+            }
+
+            if (accountFilter) {
+                accountFilter.addEventListener('change', () => submitFilters());
+            }
+        }
+
+        if (paginationContainer) {
+            paginationContainer.addEventListener('click', (event) => {
+                const link = event.target.closest('a');
+                if (!link) return;
+                event.preventDefault();
+
+                const url = new URL(link.href);
+                const params = new URLSearchParams(url.search);
+                fetchTransactions(params);
+            });
         }
     });
 </script>

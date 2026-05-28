@@ -1,0 +1,47 @@
+<div class="row g-3 mb-4" id="txn-summary" aria-live="polite">
+    <div class="col-12">
+        <div class="summary-tile p-4 h-100">
+            <div class="d-flex justify-content-between align-items-start mb-4">
+                <div>
+                    <h5 class="mb-1 fw-bold text-dark">Итоги по счету</h5>
+                    <p class="text-muted small mb-0">Найдено операций: <span id="summary-count-display">{{ filtered_count }}</span></p>
+                </div>
+                <button class="btn btn-light btn-sm rounded-pill px-3 fw-bold text-primary shadow-sm" id="summary-toggle-btn" aria-expanded="false" style="border: 1px solid #eef2f5;">
+                    Показать все ↓
+                </button>
+            </div>
+            <div class="summary-balance-grid" id="balance-summary">
+                <div class="summary-balance-item bg-white" data-global-total="{{ category_totals.buy }}">
+                    <div class="label text-danger">Покупка</div>
+                    <div class="value text-danger" data-summary-key="buy">{{ category_totals.buy }} RUB</div>
+                </div>
+                <div class="summary-balance-item bg-white" data-global-total="{{ category_totals.sell }}">
+                    <div class="label text-success">Продажа</div>
+                    <div class="value text-success" data-summary-key="sell">{{ category_totals.sell }} RUB</div>
+                </div>
+                <div class="summary-balance-item bg-white" data-global-total="{{ category_totals.commission }}">
+                    <div class="label text-secondary">Комиссия</div>
+                    <div class="value text-secondary" data-summary-key="commission">{{ category_totals.commission }} RUB</div>
+                </div>
+
+                <div class="summary-balance-item bg-white extra-category d-none" data-global-total="{{ category_totals.accrual }}">
+                    <div class="label text-primary">Начисления</div>
+                    <div class="value text-primary" data-summary-key="accrual">{{ category_totals.accrual }} RUB</div>
+                </div>
+                <div class="summary-balance-item bg-white extra-category d-none" data-global-total="{{ category_totals.tax }}">
+                    <div class="label text-warning">Налог</div>
+                    <div class="value text-warning" data-summary-key="tax">{{ category_totals.tax }} RUB</div>
+                </div>
+                <div class="summary-balance-item bg-white extra-category d-none" data-global-total="{{ category_totals.deposit }}">
+                    <div class="label text-info">Пополнение</div>
+                    <div class="value text-info" data-summary-key="deposit">{{ category_totals.deposit }} RUB</div>
+                </div>
+                <div class="summary-balance-item bg-white extra-category d-none" data-global-total="{{ category_totals.withdrawal }}">
+                    <div class="label text-dark">Вывод средств</div>
+                    <div class="value text-dark" data-summary-key="withdrawal">{{ category_totals.withdrawal }} RUB</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+

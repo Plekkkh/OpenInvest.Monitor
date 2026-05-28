@@ -1,0 +1,18 @@
+{% if is_paginated %}
+<nav aria-label="Навигация по страницам" class="mt-4" id="transactions-pagination">
+    <ul class="pagination justify-content-center border-0 gap-2">
+        {% if page_obj.has_previous %}
+            <li class="page-item"><a class="page-link border-0 rounded-circle text-dark shadow-sm" href="?page=1{% if querystring %}&{{ querystring }}{% endif %}" aria-label="Первая страница">&laquo;</a></li>
+            <li class="page-item"><a class="page-link border-0 rounded-pill text-dark shadow-sm px-3" href="?page={{ page_obj.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}">Назад</a></li>
+        {% endif %}
+
+        <li class="page-item disabled"><span class="page-link border-0 rounded-pill bg-dark text-white shadow-sm px-4">Стр. {{ page_obj.number }} из {{ page_obj.paginator.num_pages }}</span></li>
+
+        {% if page_obj.has_next %}
+            <li class="page-item"><a class="page-link border-0 rounded-pill text-dark shadow-sm px-3" href="?page={{ page_obj.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}">Вперед</a></li>
+            <li class="page-item"><a class="page-link border-0 rounded-circle text-dark shadow-sm" href="?page={{ page_obj.paginator.num_pages }}{% if querystring %}&{{ querystring }}{% endif %}" aria-label="Последняя страница">&raquo;</a></li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+

@@ -6,6 +6,8 @@ from portfolio.services.analytics import AnalyticsService
 from portfolio.mixins import OwnerRequiredMixin, CurrentAccountMixin
 from django.urls import reverse_lazy
 from portfolio.forms import BrokerAccountForm
+from django.http import JsonResponse
+from django.template.loader import render_to_string
 
 
 logger = logging.getLogger(__name__)
@@ -90,9 +92,8 @@ class TransactionListView(LoginRequiredMixin, OwnerRequiredMixin, CurrentAccount
 
         account = self.get_current_account()
         if account:
-            analytics = AnalyticsService(account)
-            context['category_totals'] = AnalyticsService.get_category_totals(analytics.get_transactions_queryset())
-            context['filtered_count'] = self.get_queryset().count()
+            context['category_totals'] = AnalyticsService.get_category_totals(self.object_list)
+            context['filtered_count'] = context['paginator'].count if context.get('paginator') else self.object_list.count()
         else:
             context['category_totals'] = {
                 'buy': '0.00',
@@ -112,6 +113,25 @@ class TransactionListView(LoginRequiredMixin, OwnerRequiredMixin, CurrentAccount
         context['selected_operation_type'] = self.request.GET.get('operation_type', 'all').strip().lower() or 'all'
 
         return context
+
+    def render_to_response(self, context, **response_kwargs):
+        """Возвращает HTML-фрагменты для AJAX-фильтров или полный шаблон.
+
+        Args:
+            context: Контекст шаблона.
+            **response_kwargs: Дополнительные параметры ответа.
+
+        Returns:
+            HttpResponse: JSON с HTML-фрагментами или полный HTML.
+        """
+        if self.request.headers.get('x-requested-with') == 'XMLHttpRequest' or self.request.GET.get('ajax') == '1':
+            return JsonResponse({
+                'summary_html': render_to_string('portfolio/partials/transactions_summary.html', context, request=self.request),
+                'rows_html': render_to_string('portfolio/partials/transactions_rows.html', context, request=self.request),
+                'pagination_html': render_to_string('portfolio/partials/transactions_pagination.html', context, request=self.request),
+            })
+
+        return super().render_to_response(context, **response_kwargs)
 
 
 class AccountCreateView(LoginRequiredMixin, CreateView):

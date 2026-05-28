@@ -1,0 +1,40 @@
+{% for txn in transactions %}
+<tr class="align-middle txn-row"
+    data-date="{{ txn.date|date:'c' }}"
+    data-account="{{ txn.account.name|lower }}"
+    data-type="{{ txn.operation_type|lower }}"
+    data-type-display="{{ txn.get_operation_type_display|lower }}"
+    data-asset="{% if txn.asset %}{{ txn.asset.ticker|lower }} {{ txn.asset.name|lower }}{% endif %}"
+    data-category="{% if txn.operation_type|lower == 'buy' %}buy{% elif txn.operation_type|lower == 'sell' %}sell{% elif txn.operation_type|lower == 'commission' or txn.operation_type|lower == 'conversion_commission' %}commission{% elif txn.operation_type|lower == 'dividend' or txn.operation_type|lower == 'coupon' or txn.operation_type|lower == 'amortization' or txn.operation_type|lower == 'other_accrual' %}accrual{% elif txn.operation_type|lower == 'tax' or txn.operation_type|lower == 'tax_refund' %}tax{% elif txn.operation_type|lower == 'deposit' or txn.operation_type|lower == 'other_income' %}deposit{% elif txn.operation_type|lower == 'withdrawal' or txn.operation_type|lower == 'other_expense' %}withdrawal{% else %}other{% endif %}"
+    data-quantity="{{ txn.quantity }}"
+    data-price="{{ txn.price_per_unit }}"
+    data-total="{{ txn.total_amount }}">
+    <td class="text-nowrap ps-4 border-top border-light">{{ txn.date|date:"d.m.Y, H:i" }}</td>
+    <td class="border-top border-light fw-semibold">{{ txn.account.name }}</td>
+    <td class="border-top border-light">
+        {% if txn.operation_type|lower == 'buy' or txn.operation_type|lower == 'deposit' %}
+            <span class="op-badge text-danger bg-danger bg-opacity-10">{{ txn.get_operation_type_display }}</span>
+        {% elif txn.operation_type|lower == 'sell' or txn.operation_type|lower == 'withdrawal' %}
+            <span class="op-badge text-success bg-success bg-opacity-10">{{ txn.get_operation_type_display }}</span>
+        {% else %}
+            <span class="op-badge text-secondary bg-secondary bg-opacity-10">{{ txn.get_operation_type_display }}</span>
+        {% endif %}
+    </td>
+    <td class="border-top border-light">
+        {% if txn.asset %}
+            <span class="fw-bold">{{ txn.asset.ticker }}</span>
+            <br><small class="text-muted">{{ txn.asset.name }}</small>
+        {% else %}
+            <span class="text-muted">—</span>
+        {% endif %}
+    </td>
+    <td class="text-end border-top border-light">{{ txn.quantity|floatformat:4 }}</td>
+    <td class="text-end border-top border-light">{{ txn.price_per_unit|floatformat:4 }} <small class="text-muted">RUB</small></td>
+    <td class="text-end pe-4 border-top border-light fw-bold">{{ txn.total_amount|floatformat:2 }} <small class="text-muted fw-normal">RUB</small></td>
+</tr>
+{% empty %}
+<tr>
+    <td colspan="7" class="text-center py-5 text-muted border-top border-light">Операции не найдены.</td>
+</tr>
+{% endfor %}
+
