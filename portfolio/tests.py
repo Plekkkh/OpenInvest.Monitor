@@ -4,6 +4,7 @@ from django.core.management import call_command
 from decimal import Decimal
 from datetime import timedelta
 import json
+import pandas as pd
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -198,6 +199,127 @@ class AnalyticsServiceTests(TestCase):
         self.assertEqual(metrics['commissions'], Decimal('2'))
         self.assertEqual(metrics['aci'], Decimal('0'))
         self.assertEqual(metrics['total_profit'], Decimal('30'))
+
+    def test_calculate_twr_handles_price_growth(self) -> None:
+        """Проверяет TWR при росте цены без промежуточных внешних потоков."""
+        account = self._create_account()
+        asset = self._create_asset('SBER')
+        base_date = now() - timedelta(days=30)
+
+        Transaction.objects.create(
+            account=account,
+            operation_type='deposit',
+            quantity=Decimal('1'),
+            price_per_unit=Decimal('1000'),
+            date=base_date,
+        )
+        Transaction.objects.create(
+            account=account,
+            asset=asset,
+            operation_type='buy',
+            quantity=Decimal('10'),
+            price_per_unit=Decimal('100'),
+            date=base_date,
+        )
+
+        class FakePriceProvider:
+            def get_price_matrix(self, account: BrokerAccount, asset_ids: list[int], valuation_dates: pd.DatetimeIndex) -> pd.DataFrame:
+                matrix = pd.DataFrame(Decimal('0'), index=valuation_dates, columns=asset_ids)
+                matrix.loc[valuation_dates[0], asset_ids[0]] = Decimal('100')
+                matrix.loc[valuation_dates[-1], asset_ids[0]] = Decimal('110')
+                return matrix.ffill()
+
+        service = AnalyticsService(account, price_provider=FakePriceProvider())
+        twr = service.calculate_twr()
+
+        self.assertAlmostEqual(twr or 0.0, 10.0, places=6)
+
+    def test_calculate_twr_ignores_mid_period_deposit(self) -> None:
+        """Проверяет, что пополнение в середине периода не искажает TWR."""
+        account = self._create_account()
+        asset = self._create_asset('GAZP')
+        start_date = now() - timedelta(days=20)
+        middle_date = now() - timedelta(days=10)
+
+        Transaction.objects.create(
+            account=account,
+            operation_type='deposit',
+            quantity=Decimal('1'),
+            price_per_unit=Decimal('1000'),
+            date=start_date,
+        )
+        Transaction.objects.create(
+            account=account,
+            asset=asset,
+            operation_type='buy',
+            quantity=Decimal('10'),
+            price_per_unit=Decimal('100'),
+            date=start_date,
+        )
+        Transaction.objects.create(
+            account=account,
+            operation_type='deposit',
+            quantity=Decimal('1'),
+            price_per_unit=Decimal('500'),
+            date=middle_date,
+        )
+
+        class FakePriceProvider:
+            def get_price_matrix(self, account: BrokerAccount, asset_ids: list[int], valuation_dates: pd.DatetimeIndex) -> pd.DataFrame:
+                matrix = pd.DataFrame(Decimal('0'), index=valuation_dates, columns=asset_ids)
+                matrix.loc[valuation_dates[0], asset_ids[0]] = Decimal('100')
+                matrix.loc[valuation_dates[1], asset_ids[0]] = Decimal('120')
+                matrix.loc[valuation_dates[-1], asset_ids[0]] = Decimal('120')
+                return matrix.ffill()
+
+        service = AnalyticsService(account, price_provider=FakePriceProvider())
+        twr = service.calculate_twr()
+
+        self.assertAlmostEqual(twr or 0.0, 20.0, places=6)
+
+    def test_calculate_twr_matches_reference_example(self) -> None:
+        """Проверяет TWR по эталонному примеру с пополнением в середине периода."""
+        account = self._create_account()
+        asset = self._create_asset('LKOH')
+        start_date = now() - timedelta(days=20)
+        middle_date = now() - timedelta(days=10)
+
+        Transaction.objects.create(
+            account=account,
+            operation_type='deposit',
+            quantity=Decimal('1'),
+            price_per_unit=Decimal('10000'),
+            date=start_date,
+        )
+        Transaction.objects.create(
+            account=account,
+            asset=asset,
+            operation_type='buy',
+            quantity=Decimal('100'),
+            price_per_unit=Decimal('100'),
+            date=start_date,
+        )
+        Transaction.objects.create(
+            account=account,
+            operation_type='deposit',
+            quantity=Decimal('1'),
+            price_per_unit=Decimal('5000'),
+            date=middle_date,
+        )
+
+        class FakePriceProvider:
+            def get_price_matrix(self, account: BrokerAccount, asset_ids: list[int], valuation_dates: pd.DatetimeIndex) -> pd.DataFrame:
+                matrix = pd.DataFrame(Decimal('0'), index=valuation_dates, columns=asset_ids)
+                matrix.loc[valuation_dates[0], asset_ids[0]] = Decimal('100')
+                matrix.loc[valuation_dates[1], asset_ids[0]] = Decimal('105')
+                matrix.loc[valuation_dates[-1], asset_ids[0]] = Decimal('110')
+                return matrix.ffill()
+
+        service = AnalyticsService(account, price_provider=FakePriceProvider())
+        twr = service.calculate_twr()
+
+        # (1 + 0.05) * (1 + 500/15500) - 1 = 0.0838709677...
+        self.assertAlmostEqual(twr or 0.0, 8.38709677, places=6)
 
 
 class TInvestServiceTests(TestCase):

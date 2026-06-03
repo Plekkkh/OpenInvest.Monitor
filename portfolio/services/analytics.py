@@ -8,6 +8,7 @@ from datetime import datetime
 from django.utils.timezone import now
 from django.db.models import Sum, F, Q, QuerySet
 from portfolio.models import BrokerAccount, Transaction
+from portfolio.services.price_provider import PriceProvider, TransactionPriceProvider
 from portfolio.services.t_invest import TInvestService, TInvestServiceError
 
 
@@ -33,8 +34,22 @@ class AnalyticsService:
         'other_expense',
     }
 
-    def __init__(self, account: BrokerAccount):
+    _external_flow_types = {
+        'deposit',
+        'withdrawal',
+        'other_income',
+        'other_expense',
+    }
+
+    _position_operation_types = {
+        'buy',
+        'sell',
+        'repayment',
+    }
+
+    def __init__(self, account: BrokerAccount, price_provider: Optional[PriceProvider] = None):
         self.account = account
+        self.price_provider: PriceProvider = price_provider or TransactionPriceProvider()
         if account.provider_type == 'T-Invest_API':
             self.api_service = TInvestService(account)
         else:
@@ -339,13 +354,220 @@ class AnalyticsService:
             logger.exception('Не удалось рассчитать XIRR для счета id=%s', self.account.pk)
             return 0.0
 
-    def calculate_twr(self) -> Optional[float]:
-        """
-        Упрощенный расчет TWR отложен до реализации подкачки исторических котировок (market data).
+    def _get_twr_transactions_df(self) -> pd.DataFrame:
+        """Возвращает транзакции в формате DataFrame для расчета TWR.
 
-        TODO
+        Returns:
+            pd.DataFrame: Данные операций с колонками для денежных потоков и позиций.
         """
-        return None
+        rows = list(
+            Transaction.objects.filter(account=self.account)
+            .values('id', 'date', 'asset_id', 'operation_type', 'quantity', 'price_per_unit')
+            .order_by('date', 'id')
+        )
+        if not rows:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(rows)
+        df['date'] = pd.to_datetime(df['date'])
+        df['quantity'] = df['quantity'].fillna(Decimal('0'))
+        df['price_per_unit'] = df['price_per_unit'].fillna(Decimal('0'))
+        df['amount'] = df['quantity'] * df['price_per_unit']
+        return df
+
+    def _build_twr_valuation_dates(self, df: pd.DataFrame) -> pd.DatetimeIndex:
+        """Формирует контрольные даты оценки для TWR.
+
+        Args:
+            df: Таблица транзакций.
+
+        Returns:
+            pd.DatetimeIndex: Отсортированный индекс контрольных дат.
+        """
+        if df.empty:
+            return pd.DatetimeIndex([])
+
+        start_date = df['date'].min()
+        end_date = max(pd.Timestamp(now()), df['date'].max())
+        flow_dates = df.loc[df['operation_type'].isin(self._external_flow_types), 'date']
+
+        all_points = pd.DatetimeIndex([start_date, end_date]).append(pd.DatetimeIndex(flow_dates.tolist()))
+        return pd.DatetimeIndex(sorted(pd.Series(all_points).dropna().unique()))
+
+    def _build_holdings_matrix(self, df: pd.DataFrame, valuation_dates: pd.DatetimeIndex) -> pd.DataFrame:
+        """Строит матрицу количеств позиций [дата x asset_id].
+
+        Args:
+            df: Таблица транзакций.
+            valuation_dates: Контрольные даты оценки.
+
+        Returns:
+            pd.DataFrame: Кумулятивные позиции по активам на даты оценки.
+        """
+        if valuation_dates.empty:
+            return pd.DataFrame()
+
+        position_df = df[
+            df['asset_id'].notna() &
+            df['operation_type'].isin(self._position_operation_types)
+        ].copy()
+
+        if position_df.empty:
+            return pd.DataFrame(index=valuation_dates)
+
+        qty_signs = {
+            'buy': Decimal('1'),
+            'sell': Decimal('-1'),
+            'repayment': Decimal('-1'),
+        }
+        position_df['signed_quantity'] = position_df['quantity'] * position_df['operation_type'].map(qty_signs)
+
+        grouped = (
+            position_df
+            .groupby(['date', 'asset_id'], as_index=False)['signed_quantity']
+            .sum()
+        )
+
+        pivot = grouped.pivot(index='date', columns='asset_id', values='signed_quantity').sort_index()
+        all_dates = valuation_dates.union(pivot.index)
+        holdings = (
+            pivot
+            .reindex(all_dates)
+            .fillna(Decimal('0'))
+            .cumsum()
+            .reindex(valuation_dates)
+            .fillna(Decimal('0'))
+        )
+        return holdings
+
+    def _build_cash_series(self, df: pd.DataFrame, valuation_dates: pd.DatetimeIndex) -> pd.Series:
+        """Строит кумулятивный денежный баланс на даты оценки.
+
+        Args:
+            df: Таблица транзакций.
+            valuation_dates: Контрольные даты оценки.
+
+        Returns:
+            pd.Series: Денежный баланс счета на каждую дату оценки.
+        """
+        cash_signs = {
+            'deposit': Decimal('1'),
+            'withdrawal': Decimal('-1'),
+            'buy': Decimal('-1'),
+            'sell': Decimal('1'),
+            'repayment': Decimal('1'),
+            'dividend': Decimal('1'),
+            'coupon': Decimal('1'),
+            'amortization': Decimal('1'),
+            'other_accrual': Decimal('1'),
+            'commission': Decimal('-1'),
+            'conversion_commission': Decimal('-1'),
+            'tax': Decimal('-1'),
+            'tax_refund': Decimal('1'),
+            'expense': Decimal('-1'),
+            'other_income': Decimal('1'),
+            'other_expense': Decimal('-1'),
+            'conversion': Decimal('0'),
+        }
+        cash_df = df.copy()
+        cash_df['cash_delta'] = cash_df['amount'] * cash_df['operation_type'].map(cash_signs).fillna(Decimal('0'))
+        by_date = cash_df.groupby('date', as_index=True)['cash_delta'].sum().sort_index()
+
+        all_dates = valuation_dates.union(by_date.index)
+        return (
+            by_date
+            .reindex(all_dates)
+            .fillna(Decimal('0'))
+            .cumsum()
+            .reindex(valuation_dates)
+            .fillna(Decimal('0'))
+        )
+
+    def _build_external_flows_series(self, df: pd.DataFrame, valuation_dates: pd.DatetimeIndex) -> pd.Series:
+        """Считает внешние денежные потоки между контрольными датами.
+
+        Args:
+            df: Таблица транзакций.
+            valuation_dates: Контрольные даты оценки.
+
+        Returns:
+            pd.Series: Потоки по периодам с индексом valuation_dates.
+        """
+        ext_signs = {
+            'deposit': Decimal('1'),
+            'other_income': Decimal('1'),
+            'withdrawal': Decimal('-1'),
+            'other_expense': Decimal('-1'),
+        }
+        ext_df = df[df['operation_type'].isin(self._external_flow_types)].copy()
+        if ext_df.empty:
+            return pd.Series(Decimal('0'), index=valuation_dates)
+
+        ext_df['external_amount'] = ext_df['amount'] * ext_df['operation_type'].map(ext_signs)
+        by_date = ext_df.groupby('date', as_index=True)['external_amount'].sum().sort_index()
+        all_dates = valuation_dates.union(by_date.index)
+        cumulative = (
+            by_date
+            .reindex(all_dates)
+            .fillna(Decimal('0'))
+            .cumsum()
+            .reindex(valuation_dates)
+            .fillna(Decimal('0'))
+        )
+        return cumulative.diff().fillna(Decimal('0'))
+
+    def calculate_twr(self) -> Optional[float]:
+        """Рассчитывает TWR (Time-Weighted Return) в процентах.
+
+        Формула по периодам:
+            r_i = (V_i - V_{i-1} - CF_i) / V_{i-1}
+            TWR = (Π(1 + r_i) - 1) * 100
+
+        Где:
+            V_i — стоимость портфеля в конце периода,
+            CF_i — внешний поток средств в периоде (пополнения/выводы).
+
+        Returns:
+            Optional[float]: TWR в процентах. Возвращает 0.0, если данных недостаточно.
+        """
+        df = self._get_twr_transactions_df()
+        if df.empty:
+            return 0.0
+
+        valuation_dates = self._build_twr_valuation_dates(df)
+        if len(valuation_dates) < 2:
+            return 0.0
+
+        holdings = self._build_holdings_matrix(df, valuation_dates)
+        cash_series = self._build_cash_series(df, valuation_dates)
+
+        if holdings.empty:
+            positions_value = pd.Series(Decimal('0'), index=valuation_dates)
+        else:
+            asset_ids = [int(asset_id) for asset_id in holdings.columns.tolist()]
+            price_matrix = self.price_provider.get_price_matrix(self.account, asset_ids, valuation_dates)
+            aligned_prices = (
+                price_matrix
+                .reindex(index=valuation_dates)
+                .reindex(columns=holdings.columns)
+                .fillna(Decimal('0'))
+            )
+            positions_value = (holdings * aligned_prices).sum(axis=1)
+
+        portfolio_values = positions_value + cash_series
+        external_flows = self._build_external_flows_series(df, valuation_dates)
+
+        prev_values = portfolio_values.shift(1)
+        period_returns = (portfolio_values - prev_values - external_flows) / prev_values
+        valid_mask = prev_values > 0
+        period_returns = period_returns.where(valid_mask).dropna()
+
+        if period_returns.empty:
+            return 0.0
+
+        gross = period_returns.apply(lambda value: Decimal('1') + self._to_decimal(value))
+        twr = gross.prod() - Decimal('1')
+        return float(twr * Decimal('100'))
 
     def get_allocation_data(self) -> tuple[list[AllocationGroup], list[str], list[float]]:
         """

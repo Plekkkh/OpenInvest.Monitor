@@ -21,6 +21,7 @@ class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
         return {
             'total_value': 0.0,
             'xirr_value': 0.0,
+            'twr_value': 0.0,
             'profit_metrics': {
                 'asset_price_difference': 0.0,
                 'realized_pnl': 0.0,
@@ -47,6 +48,7 @@ class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
             snapshot = analytics.get_current_portfolio_snapshot()
             total_value = snapshot.get('total_amount', 0.0)
             xirr_value = analytics.calculate_xirr()
+            twr_value = analytics.calculate_twr() or 0.0
             profit_metrics = analytics.get_profit_metrics()
             portfolio_classes, labels, values = analytics.get_allocation_data()
 
@@ -55,6 +57,7 @@ class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
             fallback = self._get_fallback_context()
             total_value = fallback['total_value']
             xirr_value = fallback['xirr_value']
+            twr_value = fallback['twr_value']
             profit_metrics = fallback['profit_metrics']
             labels = fallback['labels']
             values = fallback['values']
@@ -62,6 +65,7 @@ class DashboardView(LoginRequiredMixin, CurrentAccountMixin, TemplateView):
 
         context['total_value'] = total_value
         context['xirr_value'] = xirr_value
+        context['twr_value'] = twr_value
         context['profit_metrics'] = profit_metrics
         context['chart_data'] = {'labels': labels, 'values': values}
         context['portfolio_classes'] = portfolio_classes
