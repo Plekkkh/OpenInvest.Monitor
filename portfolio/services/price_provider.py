@@ -85,7 +85,6 @@ class TransactionPriceProvider:
         if prices_df.empty:
             return pd.DataFrame(Decimal('0'), index=valuation_dates, columns=asset_ids)
 
-        # Последняя цена сделки по активу на конкретную дату.
         by_date_asset = (
             prices_df
             .sort_values(['date', 'id'])

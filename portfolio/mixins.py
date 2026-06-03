@@ -16,10 +16,8 @@ class OwnerRequiredMixin(AccessMixin):
     def get_queryset(self):
         qs = super().get_queryset()
         model = qs.model
-        # For BrokerAccount
         if any(f.name == 'user' for f in model._meta.get_fields()):
             return qs.filter(user=self.request.user)
-        # For Transaction
         if any(f.name == 'account' for f in model._meta.get_fields()):
             return qs.filter(account__user=self.request.user)
         return qs
@@ -39,9 +37,7 @@ class CurrentAccountMixin:
         accounts = self.get_user_accounts()
         account_id = self.request.GET.get('account_id')
         if account_id:
-            # Получаем конкретный счет, если он принадлежит юзеру
             return accounts.filter(id=account_id).first()
-        # Иначе просто первый доступный
         return accounts.first()
 
     def get_context_data(self, **kwargs):

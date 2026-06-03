@@ -127,7 +127,6 @@ class AnalyticsService:
             return pd.DataFrame()
 
         df = pd.DataFrame(list(transactions))
-        # Конвертация типов
         df['date'] = pd.to_datetime(df['date'])
         df['quantity'] = df['quantity'].fillna(Decimal('0'))
         df['price_per_unit'] = df['price_per_unit'].fillna(Decimal('0'))
@@ -339,7 +338,6 @@ class AnalyticsService:
         snapshot = self.get_current_portfolio_snapshot()
         current_value = self._to_decimal(snapshot.get('total_amount', Decimal('0')))
 
-        # Добавляем текущую стоимость портфеля как финальный поток
         if current_value > 0:
             dates.append(now())
             amounts.append(float(current_value))
@@ -348,7 +346,6 @@ class AnalyticsService:
 
         try:
             xirr_value = pyxirr.xirr(dates, amounts)
-            # Возвращаем значение в процентах (умножаем на 100)
             return float(xirr_value) * 100.0 if xirr_value is not None else 0.0
         except (ValueError, TypeError, ArithmeticError):
             logger.exception('Не удалось рассчитать XIRR для счета id=%s', self.account.pk)
@@ -670,10 +667,8 @@ class AnalyticsService:
             op_type = stat['operation_type']
             total_sum = self._to_decimal(stat['total_sum'])
 
-            # Реализованная прибыль (от продаж/погашений)
             metrics['realized_pnl'] += self._to_decimal(stat['total_yield'])
 
-            # Исторический НКД: платим (-), получаем (+)
             aci_val = self._to_decimal(stat['total_aci'])
             if op_type == 'buy':
                 metrics['aci'] -= aci_val
@@ -683,7 +678,6 @@ class AnalyticsService:
             if op_type in accrual_types:
                 metrics['accruals'] += total_sum
             elif op_type in tax_types:
-                # Учитываем tax_refund как уменьшение налогов
                 if op_type == 'tax':
                     metrics['taxes'] += total_sum
                 else:
@@ -709,7 +703,6 @@ class AnalyticsService:
         self._calculate_position_metrics(metrics)
         self._calculate_transaction_metrics(metrics)
 
-        # Общая прибыль: Разница цен + Зафиксированная прибыль + Начисления + НКД - Налоги - Комиссии
         metrics['total_profit'] = (
             metrics['asset_price_difference'] +
             metrics['realized_pnl'] +
@@ -733,7 +726,6 @@ class AnalyticsService:
         if df.empty:
             return pd.DataFrame(columns=['date', 'amount'])
 
-        # Фильтруем только пополнения и выводы
         cash_flows_df = df[df['operation_type'].isin(['deposit', 'withdrawal'])].copy()
 
         if cash_flows_df.empty:

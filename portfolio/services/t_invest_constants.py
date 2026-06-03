@@ -1,7 +1,6 @@
 from t_tech.invest import OperationType
 
 OPERATION_MAPPING = {
-    # Сделки
     OperationType.OPERATION_TYPE_BUY: 'buy',
     OperationType.OPERATION_TYPE_BUY_CARD: 'buy',
     OperationType.OPERATION_TYPE_BUY_MARGIN: 'buy',
@@ -12,14 +11,12 @@ OPERATION_MAPPING = {
     OperationType.OPERATION_TYPE_DELIVERY_SELL: 'sell',
     OperationType.OPERATION_TYPE_BOND_REPAYMENT_FULL: 'repayment',
 
-    # Начисления
     OperationType.OPERATION_TYPE_DIVIDEND: 'dividend',
     OperationType.OPERATION_TYPE_DIV_EXT: 'dividend',
     OperationType.OPERATION_TYPE_DIVIDEND_TRANSFER: 'dividend',
     OperationType.OPERATION_TYPE_COUPON: 'coupon',
     OperationType.OPERATION_TYPE_BOND_REPAYMENT: 'amortization',
 
-    # Расходы
     OperationType.OPERATION_TYPE_BROKER_FEE: 'commission',
     OperationType.OPERATION_TYPE_SERVICE_FEE: 'commission',
     OperationType.OPERATION_TYPE_MARGIN_FEE: 'commission',
@@ -53,7 +50,6 @@ OPERATION_MAPPING = {
     OperationType.OPERATION_TYPE_TAX_REPO_REFUND: 'tax_refund',
     OperationType.OPERATION_TYPE_TAX_REPO_REFUND_PROGRESSIVE: 'tax_refund',
 
-    # Валюта
     OperationType.OPERATION_TYPE_INPUT: 'deposit',
     OperationType.OPERATION_TYPE_INP_MULTI: 'deposit',
     OperationType.OPERATION_TYPE_INPUT_SWIFT: 'deposit',

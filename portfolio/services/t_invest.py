@@ -90,8 +90,6 @@ class TInvestService:
                 collection = method()
                 for inst in collection.instruments:
                     inst_type = getattr(inst, 'instrument_type', type(inst).__name__).lower()
-                    # Сохраняем только необходимые поля в виде словаря для совместимости с Redis/Memcached
-                    # и предотвращения ошибок сериализации
                     data = {
                         'instrument_uid': getattr(inst, 'uid', None),
                         'figi': getattr(inst, 'figi', None),
@@ -387,7 +385,6 @@ class TInvestService:
             with RetryingClient(self.token, settings=self.retry_settings) as client:
                 account_id = self._get_account_id(client)
 
-                # Кэширование портфеля на 60 секунд
                 CACHE_KEY = f't_invest_portfolio_{account_id}'
                 cached_portfolio = cache.get(CACHE_KEY)
                 if cached_portfolio:
@@ -406,7 +403,6 @@ class TInvestService:
                     'updated_at': now()
                 }
 
-                # Сохраняем в кэш на 60 секунд
                 cache.set(CACHE_KEY, result, timeout=60)
 
                 return result
