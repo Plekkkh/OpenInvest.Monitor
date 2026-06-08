@@ -1,12 +1,16 @@
+from django.views import View
 from django.views.generic import TemplateView, ListView, CreateView
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib import messages
 import logging
 from portfolio.models import BrokerAccount, Transaction
 from portfolio.services.analytics import AnalyticsService
+from portfolio.services.demo_portfolio import DemoPortfolioService
 from portfolio.mixins import OwnerRequiredMixin, CurrentAccountMixin
 from django.urls import reverse_lazy
 from portfolio.forms import BrokerAccountForm
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponseRedirect
+from django.shortcuts import redirect
 from django.template.loader import render_to_string
 
 
@@ -152,3 +156,31 @@ class AccountCreateView(LoginRequiredMixin, CreateView):
         if raw_token:
             form.instance.api_token = raw_token
         return super().form_valid(form)
+
+
+class DemoPortfolioSeedView(LoginRequiredMixin, View):
+    """Создает или обновляет демо-портфель для текущего пользователя."""
+
+    http_method_names = ['post']
+
+    def post(self, request, *args, **kwargs):
+        """Обрабатывает создание демо-данных и перенаправляет на dashboard.
+
+        Args:
+            request: HTTP-запрос.
+            *args: Позиционные аргументы Django.
+            **kwargs: Именованные аргументы Django.
+
+        Returns:
+            HttpResponseRedirect: Перенаправление на dashboard с выбранным счетом.
+        """
+        result = DemoPortfolioService().seed_for_user(request.user)
+        messages.success(
+            request,
+            (
+                f"Демо-портфель готов: счет «{result.account.name}», "
+                f"транзакций создано/обновлено: {result.created_transactions}."
+            ),
+        )
+        return redirect(f"{reverse_lazy('portfolio:dashboard')}?account_id={result.account.pk}")
+

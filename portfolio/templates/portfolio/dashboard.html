@@ -26,6 +26,16 @@
     }
 </style>
 
+{% if messages %}
+<div class="mb-4">
+    {% for message in messages %}
+    <div class="alert alert-{{ message.tags }} shadow-sm mb-2" role="alert">
+        {{ message }}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
 <div class="row mb-5 align-items-center">
     <div class="col">
         <h2 class="mb-0">Портфель</h2>
@@ -47,8 +57,17 @@
 
 {% if not account %}
 <div class="alert alert-warning island" style="display: flex; justify-content: space-between; align-items: center;">
-    <span>No accounts found. Please add a broker account.</span>
-    <a href="{% url 'portfolio:add_account' %}" class="btn btn-sm btn-primary">Добавить счет</a>
+    <div>
+        <div class="fw-bold mb-1">Нет аккаунтов. Пожалуйста, добавьте аккаунт, чтобы начать работу с портфелем.</div>
+        <div class="text-muted small">Или создайте демо-портфель одной кнопкой для быстрой проверки дашборда.</div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap justify-content-end">
+        <form method="post" action="{% url 'portfolio:seed_demo_portfolio' %}" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm btn-success">Создать демо-портфель</button>
+        </form>
+        <a href="{% url 'portfolio:add_account' %}" class="btn btn-sm btn-primary">Добавить счет</a>
+    </div>
 </div>
 {% else %}
 

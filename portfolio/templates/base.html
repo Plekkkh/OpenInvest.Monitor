@@ -29,7 +29,6 @@
             transform: translateY(-2px);
             box-shadow: 0 12px 32px rgba(149, 157, 165, 0.15);
         }
-        */
 
         .card-header {
             background-color: transparent !important;
@@ -169,6 +168,15 @@
 </nav>
 
 <div class="container mt-2">
+    {% if messages %}
+    <div class="mb-3">
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} shadow-sm mb-2" role="alert">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
     {% block content %}
     {% endblock %}
 </div>

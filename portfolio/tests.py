@@ -621,3 +621,29 @@ class DemoPortfolioSeedCommandTests(TestCase):
         self.assertIn('Валюта', labels)
 
 
+class DemoPortfolioSeedViewTests(TestCase):
+    """Проверяет создание демо-портфеля через веб-кнопку."""
+
+    def test_seed_demo_portfolio_view_creates_data_and_redirects(self) -> None:
+        """POST-запрос должен создать демо-портфель и вернуть редирект."""
+        user = User.objects.create_user(username='teacher')
+        self.client.force_login(user)
+
+        response = self.client.post('/portfolio/demo/seed/')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/portfolio/dashboard/', response.url)
+
+        account = BrokerAccount.objects.get(user=user, name='Test_Inv')
+        service = AnalyticsService(account)
+        snapshot = service.get_current_portfolio_snapshot()
+
+        self.assertGreater(Transaction.objects.filter(account=account).count(), 0)
+        self.assertGreater(snapshot['total_amount'], Decimal('0'))
+        self.assertContains(
+            self.client.get(response.url),
+            'Демо-портфель готов',
+            status_code=200,
+        )
+
+
