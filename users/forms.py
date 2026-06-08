@@ -3,20 +3,30 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 import re
 
+
+COMMON_INPUT_ATTRS = {
+    'class': 'form-input',
+    'style': 'width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;',
+}
+
+
 class RegistrationForm(forms.ModelForm):
-    password = forms.CharField(widget=forms.PasswordInput(attrs={'placeholder': 'Пароль', 'class': 'form-input'}))
-    password_confirm = forms.CharField(widget=forms.PasswordInput(attrs={'placeholder': 'Подтвердите пароль', 'class': 'form-input'}))
+    password = forms.CharField(widget=forms.PasswordInput(attrs={**COMMON_INPUT_ATTRS, 'placeholder': 'Пароль'}))
+    password_confirm = forms.CharField(widget=forms.PasswordInput(attrs={**COMMON_INPUT_ATTRS, 'placeholder': 'Подтвердите пароль'}))
 
     class Meta:
         model = User
         fields = ['username', 'email']
         widgets = {
-            'username': forms.TextInput(attrs={'placeholder': 'Имя пользователя', 'class': 'form-input'}),
-            'email': forms.EmailInput(attrs={'placeholder': 'Email', 'class': 'form-input'}),
+            'username': forms.TextInput(attrs={**COMMON_INPUT_ATTRS, 'placeholder': 'Имя пользователя'}),
+            'email': forms.EmailInput(attrs={**COMMON_INPUT_ATTRS, 'placeholder': 'Email'}),
         }
 
     def clean_password(self):
         password = self.cleaned_data.get('password')
+        if not password:
+            return password
+        password = str(password)
         if len(password) < 8:
             raise ValidationError("Пароль должен содержать минимум 8 символов.")
         if not re.search(r'\d', password):
